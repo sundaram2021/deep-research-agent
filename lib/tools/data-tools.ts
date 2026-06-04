@@ -40,7 +40,7 @@ export const json_to_csv = tool(async ({ data }) => {
   const headers = Object.keys(data[0]);
   const rows = data.map((obj) => headers.map((h) => JSON.stringify(obj[h] ?? "")).join(","));
   return [headers.join(","), ...rows].join("\n");
-}, { name: "json_to_csv", description: "Convert an array of record objects to a CSV string. Pass data as a real array, not JSON.", schema: z.object({ data: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))) }) });
+}, { name: "json_to_csv", description: "Convert an array of record objects to a CSV string. Pass data as a real array, not JSON.", schema: z.object({ data: z.array(z.any()) }) });
 
 export const calculate_stats = tool(async ({ numbers }) => {
   if (numbers.length === 0) return "No numbers provided";
