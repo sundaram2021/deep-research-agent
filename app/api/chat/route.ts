@@ -236,19 +236,24 @@ async function runResearchersInParallel(
           if (finalText) lastText = finalText;
         } else if (ev.event === "on_tool_start") {
           send(controller, {
+            // Use LangChain's stable per-run id so tool.start and tool.end
+            // share the same id (Date.now() drifted between the two before,
+            // so tool.end never matched and the spinner never stopped).
             type: "tool.start",
-            id: `${runId}-${String(ev.name ?? "tool")}-${Date.now()}`,
+            id: String(ev.run_id ?? `${runId}-${String(ev.name ?? "tool")}`),
             name: String(ev.name ?? "tool"),
-            parent: handle.name,
+            // Tag with the unique subagent runId (not the shared "researcher"
+            // name) so the UI can nest each tool under the right subagent.
+            parent: runId,
             data: { args: ev.data?.input },
             ts: Date.now(),
           });
         } else if (ev.event === "on_tool_end") {
           send(controller, {
             type: "tool.end",
-            id: `${runId}-${String(ev.name ?? "tool")}-${Date.now()}`,
+            id: String(ev.run_id ?? `${runId}-${String(ev.name ?? "tool")}`),
             name: String(ev.name ?? "tool"),
-            parent: handle.name,
+            parent: runId,
             data: { output: extractToolContent(ev.data?.output) },
             ts: Date.now(),
           });

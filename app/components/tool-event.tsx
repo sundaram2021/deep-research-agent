@@ -44,11 +44,11 @@ export default function ToolEvent({ toolCall }: { toolCall: ToolCallRecord }) {
     <div className="overflow-hidden rounded-lg border border-zinc-800/70 bg-zinc-900/40">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs hover:bg-zinc-900/60"
+        className="flex w-full min-w-0 items-center gap-2.5 px-3 py-1.5 text-left text-xs hover:bg-zinc-900/60"
       >
         <ToolIcon size={14} className="shrink-0 text-zinc-400" />
-        <span className="font-mono text-zinc-200">{toolCall.name}</span>
-        <span className="ml-auto flex items-center gap-2 text-[11px]">
+        <span className="min-w-0 truncate font-mono text-zinc-200">{toolCall.name}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]">
           {!running && ms > 0 && <span className="font-mono text-zinc-500">{ms}ms</span>}
           <StatusIcon size={12} className={statusColor} />
           {open ? (
@@ -62,18 +62,18 @@ export default function ToolEvent({ toolCall }: { toolCall: ToolCallRecord }) {
       {open && (
         <div className="space-y-2 border-t border-zinc-800/60 bg-black/30 px-3 py-2 font-mono text-[11px]">
           <Section label="Input">
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all text-zinc-300">{argsString}</pre>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words text-zinc-300">{argsString}</pre>
           </Section>
           {success && outputString && (
             <Section label="Output">
-              <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-all text-emerald-300/90">
+              <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words text-emerald-300/90">
                 {truncate(outputString, 4000)}
               </pre>
             </Section>
           )}
           {failed && (
             <Section label="Error">
-              <pre className="whitespace-pre-wrap text-red-300">{outputString || "Tool failed"}</pre>
+              <pre className="whitespace-pre-wrap break-words text-red-300">{outputString || "Tool failed"}</pre>
             </Section>
           )}
           {running && (

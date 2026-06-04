@@ -1,9 +1,13 @@
-import type { AgentEvent, AssistantTurn } from "@/app/lib/event-types";
+import type {
+  AgentEvent,
+  AssistantTurn,
+  SubagentRecord,
+  ToolCallRecord,
+} from "@/app/lib/event-types";
 import type { BulletPoint, ResearchAgentOutput } from "@/lib/schemas/agent-schemas";
 
 type UpdateTurn = (mut: (t: AssistantTurn) => void) => void;
 
-const PARENT_KEYS = new Set(["researcher", "agent"]);
 const isParentScope = (parent: string | null | undefined) =>
   !parent || parent === "agent" || parent === "researcher";
 
@@ -16,6 +20,36 @@ function strField(ev: AgentEvent, key: string): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+// Move any still-"running" tools (and subagents) to a terminal state. Used when
+// a subagent ends/errors or the whole run finishes, so the UI never shows a
+// spinner that never resolves (e.g. a dropped tool.end, or a subagent that
+// throws mid-tool). When `toolIds` is provided only those tools are touched.
+function finalizeRunning(
+  t: AssistantTurn,
+  ts: number,
+  toolStatus: ToolCallRecord["status"],
+  subStatus: SubagentRecord["status"],
+  toolIds?: string[]
+): void {
+  const ids = toolIds ?? Object.keys(t.toolCalls);
+  for (const id of ids) {
+    const tc = t.toolCalls[id];
+    if (tc && tc.status === "running") {
+      tc.status = toolStatus;
+      tc.endedAt = tc.endedAt ?? ts;
+    }
+  }
+  if (!toolIds) {
+    for (const id in t.subagents) {
+      const sa = t.subagents[id];
+      if (sa.status === "running") {
+        sa.status = subStatus;
+        sa.endedAt = sa.endedAt ?? ts;
+      }
+    }
+  }
+}
+
 export function applyEvent(
   ev: AgentEvent,
   updateTurn: UpdateTurn,
@@ -25,19 +59,20 @@ export function applyEvent(
     case "tool.start": {
       const id = ev.id ?? crypto.randomUUID();
       const args = getData(ev).args;
+      const parent = ev.parent ?? null;
       updateTurn((t) => {
         t.toolCalls[id] = {
           id,
           name: ev.name ?? "tool",
           args: args ?? {},
-          parent: ev.parent ?? null,
+          parent,
           status: "running",
           startedAt: ev.ts,
         };
-        if (ev.parent && PARENT_KEYS.has(ev.parent)) {
-          const subagent = findSubagentForTool(t, ev.parent);
-          if (subagent) subagent.toolCallIds.push(id);
-        }
+        // Attribute the tool to its subagent by id so the timeline can nest it
+        // under the correct (parallel) subagent.
+        const sa = parent ? t.subagents[parent] : null;
+        if (sa && !sa.toolCallIds.includes(id)) sa.toolCallIds.push(id);
         t.entries.push({ kind: "tool", id, ts: ev.ts });
       });
       return;
@@ -82,6 +117,8 @@ export function applyEvent(
         sa.output = output;
         sa.status = "complete";
         sa.endedAt = ev.ts;
+        // A finished subagent means its tools are done too.
+        finalizeRunning(t, ev.ts, "success", "complete", sa.toolCallIds);
       });
       return;
     }
@@ -95,6 +132,8 @@ export function applyEvent(
           sa.status = "error";
           sa.errorMessage = message;
           sa.endedAt = ev.ts;
+          // A failed subagent interrupts its in-flight tools.
+          finalizeRunning(t, ev.ts, "error", "error", sa.toolCallIds);
         } else {
           t.entries.push({
             kind: "thought",
@@ -148,6 +187,8 @@ export function applyEvent(
         if (ev.type === "run.end" && typeof duration === "number") {
           t.durationMs = duration;
         }
+        // Run finished: nothing should still be spinning.
+        finalizeRunning(t, ev.ts, "success", "complete");
       });
       return;
     }
@@ -158,6 +199,7 @@ export function applyEvent(
         t.done = true;
         t.phase = "error";
         t.error = message;
+        finalizeRunning(t, ev.ts, "error", "error");
       });
       return;
     }
@@ -178,15 +220,4 @@ export function applyEvent(
     case "research.start":
       return;
   }
-}
-
-function findSubagentForTool(turn: AssistantTurn, parentName: string) {
-  let latest: AssistantTurn["subagents"][string] | null = null;
-  for (const id in turn.subagents) {
-    const sa = turn.subagents[id];
-    if (sa.name === parentName && sa.status === "running") {
-      if (!latest || sa.startedAt > latest.startedAt) latest = sa;
-    }
-  }
-  return latest;
 }
