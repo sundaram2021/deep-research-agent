@@ -1,6 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import crypto from "node:crypto";
+import { evaluateMath } from "../utils/safe-math";
 
 export const json_parse = tool(async ({ json }) => {
   try {
@@ -66,8 +67,12 @@ export const calculate_stats = tool(async ({ numbers }) => {
 }, { name: "calculate_stats", description: "Calculate count, sum, mean, min, max from a number array. Pass numbers as a real array, not JSON.", schema: z.object({ numbers: z.array(z.number()) }) });
 
 export const math_eval = tool(async ({ expr }) => {
-  return String(new Function(`return (${expr})`)());
-}, { name: "math_eval", description: "Safely evaluate basic math expression", schema: z.object({ expr: z.string() }) });
+  try {
+    return String(evaluateMath(expr));
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}, { name: "math_eval", description: "Safely evaluate an arithmetic expression (+ - * / % ^, parentheses, and functions like sqrt, abs, round, min, max, pow, log). No arbitrary code execution.", schema: z.object({ expr: z.string() }) });
 
 export const date_format = tool(async ({ dateStr, format }) => {
   const d = new Date(dateStr);
