@@ -109,11 +109,8 @@ export function useResearchAgent() {
               : "Unknown error";
           setError(message);
           setResearchState((prev) => ({ ...prev, phase: "error" }));
-          updateTurn((t) => {
-            t.phase = "error";
-            t.done = true;
-            t.error = message;
-          });
+          // Let applyEvent set the turn error AND finalize any running tools/subagents.
+          applyEvent(ev, updateTurn, scratchRef);
           return;
         }
         applyEvent(ev, updateTurn, scratchRef);
@@ -179,11 +176,8 @@ export function useResearchAgent() {
                 : "Unknown error";
             setError(message);
             setResearchState((prev) => ({ ...prev, phase: "error" }));
-            updateTurn((t) => {
-              t.phase = "error";
-              t.done = true;
-              t.error = message;
-            });
+            // Let applyEvent set the turn error AND finalize any running tools/subagents.
+            applyEvent(ev, updateTurn, scratchRef);
             return;
           }
           applyEvent(ev, updateTurn, scratchRef);
