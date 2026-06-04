@@ -82,8 +82,15 @@ export function pLimit(concurrency: number): LimitFn {
     return new Promise<T>((resolve, reject) => {
       const start = () => {
         active++;
-        fn().then(resolve, reject).finally(next);
+        Promise.resolve()
+          .then(fn)
+          .then(resolve, reject)
+          .finally(next);
       };
+      if (active < concurrency) start();
+      else queue.push(start);
+    });
+  };
       if (active < concurrency) start();
       else queue.push(start);
     });
