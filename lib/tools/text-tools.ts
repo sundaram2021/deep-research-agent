@@ -1,9 +1,9 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
-export const text_summarize = tool(async ({ text, maxLength = 200 }) => {
+export const text_truncate = tool(async ({ text, maxLength = 200 }) => {
   return text.slice(0, maxLength) + (text.length > maxLength ? "..." : "");
-}, { name: "text_summarize", description: "Summarize a text block", schema: z.object({ text: z.string(), maxLength: z.number().default(200) }) });
+}, { name: "text_truncate", description: "Hard-truncate text to maxLength characters with an ellipsis. NOTE: a literal cut, not a semantic summary — do not use it to summarize evidence.", schema: z.object({ text: z.string(), maxLength: z.number().default(200) }) });
 
 export const keyword_extract = tool(async ({ text }) => {
   const common = new Set(["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "is", "are", "of"]);
@@ -22,7 +22,7 @@ export const sentiment_analyze = tool(async ({ text }) => {
     if (neg.includes(w)) score--;
   });
   return score > 0 ? "positive" : score < 0 ? "negative" : "neutral";
-}, { name: "sentiment_analyze", description: "Analyze basic sentiment", schema: z.object({ text: z.string() }) });
+}, { name: "sentiment_analyze", description: "Naive lexicon-based polarity (positive/negative/neutral). A rough heuristic only — not reliable sentiment analysis.", schema: z.object({ text: z.string() }) });
 
 export const extract_emails = tool(async ({ text }) => {
   const matches = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
@@ -67,7 +67,7 @@ export const base64_decode = tool(async ({ encoded }) => {
 }, { name: "base64_decode", description: "Decode base64 to text", schema: z.object({ encoded: z.string() }) });
 
 export const textTools = [
-  text_summarize, keyword_extract, sentiment_analyze, extract_emails, extract_urls,
+  text_truncate, keyword_extract, sentiment_analyze, extract_emails, extract_urls,
   clean_whitespace, word_count, char_count, line_count, to_lowercase, to_uppercase,
   base64_encode, base64_decode
 ];

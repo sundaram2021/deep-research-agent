@@ -12,7 +12,10 @@ import assert from "node:assert";
 
 function testToolRegistry() {
   const totalTools = searchTools.length + textTools.length + dataTools.length + agentTools.length;
-  assert.ok(totalTools >= 50, `Expected at least 50 tools, got ${totalTools}`);
+  // Phase 0 removed mock/noise tools (get_domain_rank, list_search_engines) and
+  // replaced others with real implementations. We favor real, honest tools over a
+  // padded count, so the floor is 40 rather than the original 50.
+  assert.ok(totalTools >= 40, `Expected at least 40 tools, got ${totalTools}`);
   console.log(`[PASS] testToolRegistry (${totalTools} tools)`);
 }
 

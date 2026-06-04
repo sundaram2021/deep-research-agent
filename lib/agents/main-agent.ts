@@ -1,5 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { mainAgentPlanSchema, type MainAgentPlan } from "../schemas/agent-schemas";
+import { withRetry } from "../utils/network-helpers";
 import { MAIN_AGENT_PLAN_PROMPT } from "./prompts";
 
 export interface PlanResult {
@@ -15,10 +16,12 @@ export async function generateResearchPlan(
     name: "ResearchPlan",
   });
 
-  const result = await structured.invoke([
-    { role: "system", content: MAIN_AGENT_PLAN_PROMPT },
-    { role: "user", content: topic },
-  ]);
+  const result = await withRetry(() =>
+    structured.invoke([
+      { role: "system", content: MAIN_AGENT_PLAN_PROMPT },
+      { role: "user", content: topic },
+    ])
+  );
 
   return { plan: result, raw: JSON.stringify(result) };
 }

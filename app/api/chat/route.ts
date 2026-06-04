@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import type { ChatOpenAI } from "@langchain/openai";
 import { getModelPair } from "../../../lib/models";
 import { generateResearchPlan } from "../../../lib/agents/main-agent";
 import {
@@ -7,9 +8,10 @@ import {
   createResearcherAgent,
 } from "../../../lib/agents/researcher-agent";
 import { streamSynthesis } from "../../../lib/agents/synthesis";
+import { extractResearchOutput } from "../../../lib/agents/researcher-output";
+import { pLimit } from "../../../lib/utils/network-helpers";
 import {
   bulletPointSchema,
-  researchAgentOutputSchema,
   type BulletPoint,
   type ResearchAgentOutput,
 } from "../../../lib/schemas/agent-schemas";
@@ -18,7 +20,8 @@ import { extractText, extractToolContent } from "./stream-helpers";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const bulletPointArray = z.array(bulletPointSchema).min(1).max(6);
+// Cap fan-out so a wide plan does not blow provider rate limits / credits.
+const DEFAULT_CONCURRENCY = 3;
 
 const requestSchema = z.object({
   prompt: z.string().min(1).max(4000),
@@ -118,7 +121,8 @@ function streamResearchPhase(
           prompt,
           bullets,
           controller,
-          send
+          send,
+          researcher
         );
 
         const failed = subagentResults.filter((r) => !r.output);
@@ -200,9 +204,16 @@ async function runResearchersInParallel(
   topic: string,
   bullets: BulletPoint[],
   controller: ReadableStreamDefaultController,
-  send: (c: ReadableStreamDefaultController, e: AgentEvent) => void
+  send: (c: ReadableStreamDefaultController, e: AgentEvent) => void,
+  researcherModel: ChatOpenAI
 ): Promise<SubagentRun[]> {
-  const tasks = bullets.map(async (bullet, i): Promise<SubagentRun> => {
+  const concurrency = Math.max(
+    1,
+    Number(process.env.RESEARCH_CONCURRENCY) || DEFAULT_CONCURRENCY
+  );
+  const limit = pLimit(concurrency);
+
+  const runOne = async (bullet: BulletPoint): Promise<SubagentRun> => {
     const runId = `subagent-${bullet.index}-${Date.now()}`;
     const prompt = buildResearcherPrompt(topic, bullet);
     send(controller, {
@@ -260,7 +271,12 @@ async function runResearchersInParallel(
         }
       }
 
-      const parsed = parseResearcherOutput(lastText, bullet.index, bullet.title);
+      const parsed = await extractResearchOutput(
+        researcherModel,
+        lastText,
+        bullet.index,
+        bullet.title
+      );
       if (!parsed) {
         send(controller, {
           type: "subagent.error",
@@ -286,55 +302,10 @@ async function runResearchersInParallel(
         ts: Date.now(),
       });
       return { bulletIndex: bullet.index, bulletTitle: bullet.title, output: null, error: errMessage(err) };
-    } finally {
-      // i unused but kept for future per-bullet progress
-      void i;
     }
-  });
+  };
 
-  return Promise.all(tasks);
-}
-
-function parseResearcherOutput(
-  text: string,
-  bulletIndex: number,
-  bulletTitle: string
-): ResearchAgentOutput | null {
-  const cleaned = stripCodeFences(text);
-  const candidates: string[] = [];
-  candidates.push(cleaned);
-
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    candidates.push(cleaned.slice(firstBrace, lastBrace + 1));
-  }
-
-  for (const c of candidates) {
-    try {
-      const obj = JSON.parse(c);
-      const coerced = {
-        bulletIndex: obj.bulletIndex ?? bulletIndex,
-        bulletTitle: obj.bulletTitle ?? bulletTitle,
-        findings: Array.isArray(obj.findings) ? obj.findings : [],
-        summary: typeof obj.summary === "string" ? obj.summary : "",
-        confidenceScore:
-          typeof obj.confidenceScore === "number" ? obj.confidenceScore : 0.5,
-      };
-      const result = researchAgentOutputSchema.safeParse(coerced);
-      if (result.success) return result.data;
-    } catch {
-      // try next
-    }
-  }
-  return null;
-}
-
-function stripCodeFences(text: string): string {
-  return text
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/, "")
-    .trim();
+  return Promise.all(bullets.map((bullet) => limit(() => runOne(bullet))));
 }
 
 function sseResponse(stream: ReadableStream) {
