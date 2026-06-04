@@ -1,40 +1,39 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
+const sectionsSchema = z.array(z.object({ heading: z.string(), content: z.string() }));
+const stringArray = z.array(z.string());
+const sourceSchema = z.array(z.object({ title: z.string(), url: z.string() }));
+const tableSchema = z.array(z.array(z.string()));
+
 export const compile_markdown_report = tool(async ({ title, sections }) => {
   const parts = [`# ${title}`];
-  JSON.parse(sections).forEach((s: any) => { parts.push(`## ${s.heading}\n${s.content}`); });
+  for (const s of sections) parts.push(`## ${s.heading}\n${s.content}`);
   return parts.join("\n\n");
-}, { name: "compile_markdown_report", description: "Compile sections to report", schema: z.object({ title: z.string(), sections: z.string() }) });
+}, { name: "compile_markdown_report", description: "Compile a list of {heading, content} sections into a markdown report. Pass sections as a real array, not JSON.", schema: z.object({ title: z.string(), sections: sectionsSchema }) });
 
-export const create_markdown_table = tool(async ({ headersJson, rowsJson }) => {
-  const headers = JSON.parse(headersJson) as string[];
-  const rows = JSON.parse(rowsJson) as string[][];
+export const create_markdown_table = tool(async ({ headers, rows }) => {
   const sep = headers.map(() => "---").join(" | ");
-  const lines = [headers.join(" | "), sep, ...rows.map(r => r.join(" | "))];
+  const lines = [headers.join(" | "), sep, ...rows.map((r) => r.join(" | "))];
   return lines.join("\n");
-}, { name: "create_markdown_table", description: "Create markdown table", schema: z.object({ headersJson: z.string(), rowsJson: z.string() }) });
+}, { name: "create_markdown_table", description: "Build a markdown table from a headers array and a 2D rows array. Pass real arrays, not JSON strings.", schema: z.object({ headers: stringArray, rows: tableSchema }) });
 
-export const verify_checklist = tool(async ({ itemsJson, checkedJson }) => {
-  const items = JSON.parse(itemsJson) as string[];
-  const checked = new Set(JSON.parse(checkedJson) as string[]);
-  return items.map(it => `[${checked.has(it) ? "x" : " "}] ${it}`).join("\n");
-}, { name: "verify_checklist", description: "Render status checklist", schema: z.object({ itemsJson: z.string(), checkedJson: z.string() }) });
+export const verify_checklist = tool(async ({ items, checked }) => {
+  const set = new Set(checked);
+  return items.map((it) => `[${set.has(it) ? "x" : " "}] ${it}`).join("\n");
+}, { name: "verify_checklist", description: "Render a markdown checklist. Pass items (string[]) and checked (string[]) as real arrays.", schema: z.object({ items: stringArray, checked: stringArray }) });
 
-export const format_citations = tool(async ({ sourcesJson }) => {
-  const sources = JSON.parse(sourcesJson) as { title: string; url: string }[];
+export const format_citations = tool(async ({ sources }) => {
   return sources.map((s, i) => `[${i + 1}] "${s.title}" - ${s.url}`).join("\n");
-}, { name: "format_citations", description: "Format article citations", schema: z.object({ sourcesJson: z.string() }) });
+}, { name: "format_citations", description: "Format article citations. Pass sources as a real array of {title, url} objects.", schema: z.object({ sources: sourceSchema }) });
 
-export const generate_bullet_points = tool(async ({ itemsJson }) => {
-  const items = JSON.parse(itemsJson) as string[];
-  return items.map(it => `* ${it}`).join("\n");
-}, { name: "generate_bullet_points", description: "Generate markdown bullets", schema: z.object({ itemsJson: z.string() }) });
+export const generate_bullet_points = tool(async ({ items }) => {
+  return items.map((it) => `* ${it}`).join("\n");
+}, { name: "generate_bullet_points", description: "Convert a list of strings to markdown bullets. Pass a real array, not a JSON string.", schema: z.object({ items: stringArray }) });
 
-export const summarize_key_findings = tool(async ({ findingsJson }) => {
-  const findings = JSON.parse(findingsJson) as string[];
+export const summarize_key_findings = tool(async ({ findings }) => {
   return `KEY FINDINGS:\n` + findings.map((f, i) => `${i + 1}. ${f}`).join("\n");
-}, { name: "summarize_key_findings", description: "Summarize findings", schema: z.object({ findingsJson: z.string() }) });
+}, { name: "summarize_key_findings", description: "Number a list of findings. Pass a real string array, not JSON.", schema: z.object({ findings: stringArray }) });
 
 export const validate_research_goal = tool(async ({ goal }) => {
   return goal.length > 10 ? "valid" : "invalid: Goal is too short";
@@ -44,17 +43,15 @@ export const append_to_file = tool(async ({ text, fileContent }) => {
   return `${fileContent}\n${text}`;
 }, { name: "append_to_file", description: "Append text block to file content", schema: z.object({ text: z.string(), fileContent: z.string() }) });
 
-export const create_draft_outline = tool(async ({ topic, sectionsJson }) => {
-  const sections = JSON.parse(sectionsJson) as string[];
+export const create_draft_outline = tool(async ({ topic, sections }) => {
   return `OUTLINE FOR: ${topic}\n` + sections.map((s, i) => `${i + 1}. ${s}`).join("\n");
-}, { name: "create_draft_outline", description: "Create outline draft", schema: z.object({ topic: z.string(), sectionsJson: z.string() }) });
+}, { name: "create_draft_outline", description: "Create outline draft. Pass sections as a real string array, not JSON.", schema: z.object({ topic: z.string(), sections: stringArray }) });
 
-export const assess_relevance = tool(async ({ text, keywordsJson }) => {
-  const keywords = JSON.parse(keywordsJson) as string[];
+export const assess_relevance = tool(async ({ text, keywords }) => {
   const lowerText = text.toLowerCase();
-  const hits = keywords.filter(k => lowerText.includes(k.toLowerCase()));
+  const hits = keywords.filter((k) => lowerText.includes(k.toLowerCase()));
   return JSON.stringify({ score: hits.length / keywords.length, matched: hits });
-}, { name: "assess_relevance", description: "Assess text relevance to keywords", schema: z.object({ text: z.string(), keywordsJson: z.string() }) });
+}, { name: "assess_relevance", description: "Assess text relevance to keywords. Pass keywords as a real string array, not JSON.", schema: z.object({ text: z.string(), keywords: stringArray }) });
 
 export const compare_texts = tool(async ({ textA, textB }) => {
   return textA === textB ? "identical" : "different";

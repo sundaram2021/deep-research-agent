@@ -1,23 +1,27 @@
 import ChatInterface from "./components/chat-interface";
+import { IconSparkles } from "./components/icons";
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen bg-zinc-950 text-zinc-100 font-sans">
-      <header className="border-b border-zinc-800 bg-zinc-900/40 backdrop-blur py-4 px-6 flex items-center justify-between">
+    <div className="flex h-dvh flex-col bg-zinc-950 text-zinc-100">
+      <header className="flex items-center justify-between border-b border-zinc-800/80 bg-zinc-950/80 px-4 py-3 backdrop-blur md:px-6">
         <div className="flex items-center gap-3">
-          <span className="text-xl">🧬</span>
-          <div>
-            <h1 className="text-base font-semibold tracking-tight text-zinc-100">Deep Research Agent</h1>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Autonomous LangGraph Swarm</p>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-900/40 bg-indigo-950/40 text-indigo-300">
+            <IconSparkles size={18} />
+          </div>
+          <div className="flex flex-col">
+            <h1 className="text-sm font-semibold tracking-tight">Deep Research Agent</h1>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-500">Autonomous LangGraph Swarm</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs bg-emerald-950 text-emerald-400 px-2 py-1 rounded border border-emerald-800 font-mono">
-            Active session
+          <span className="flex items-center gap-1.5 rounded-md border border-emerald-900/60 bg-emerald-950/40 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-emerald-300">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+            Live
           </span>
         </div>
       </header>
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex flex-1 overflow-hidden">
         <ChatInterface />
       </main>
     </div>

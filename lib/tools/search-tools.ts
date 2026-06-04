@@ -8,7 +8,7 @@ export const search_exa = tool(async ({ query, limit = 5 }) => {
   if (!process.env.EXA_API_KEY) return `[MOCK SEARCH RESULT for "${query}"]: Mock result list.`;
   const res = await exa().search(query, { numResults: limit });
   return JSON.stringify(res.results);
-}, { name: "search_exa", description: "Search Exa for links", schema: z.object({ query: z.string(), limit: z.number().optional() }) });
+}, { name: "search_exa", description: "Search Exa for links", schema: z.object({ query: z.string(), limit: z.number().default(5) }) });
 
 export const get_content_exa = tool(async ({ urls }) => {
   if (!process.env.EXA_API_KEY) return urls.map(u => `[MOCK CONTENT for ${u}]: page content.`).join("\n");
@@ -20,7 +20,7 @@ export const find_similar_exa = tool(async ({ url, limit = 5 }) => {
   if (!process.env.EXA_API_KEY) return `[MOCK SIMILAR to ${url}]`;
   const res = await exa().findSimilar(url, { numResults: limit });
   return JSON.stringify(res.results);
-}, { name: "find_similar_exa", description: "Find similar links", schema: z.object({ url: z.string(), limit: z.number().optional() }) });
+}, { name: "find_similar_exa", description: "Find similar links", schema: z.object({ url: z.string(), limit: z.number().default(5) }) });
 
 export const search_news = tool(async ({ query }) => {
   if (!process.env.EXA_API_KEY) return `[MOCK NEWS for "${query}"]`;

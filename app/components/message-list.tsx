@@ -1,32 +1,27 @@
-import { Message } from "./chat-interface";
+import type { Message } from "@/app/lib/event-types";
 import MessageItem from "./message-item";
+import { IconAlert } from "./icons";
 
-interface MessageListProps {
+interface Props {
   messages: Message[];
   error: string | null;
+  loading: boolean;
 }
 
-export default function MessageList({ messages, error }: MessageListProps) {
-  if (messages.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-zinc-500 py-20">
-        <div className="text-4xl mb-4">🔍</div>
-        <p className="text-lg font-medium">Deep Research Agent</p>
-        <p className="text-sm text-zinc-400 mt-2">Enter a topic to start an automated, long-horizon deep research run.</p>
-      </div>
-    );
-  }
-
+export default function MessageList({ messages, error, loading }: Props) {
   return (
     <div className="space-y-6">
       {messages.map((msg) => (
-        <MessageItem key={msg.id} message={msg} />
+        <MessageItem key={msg.id} message={msg} loading={loading} />
       ))}
-      
+
       {error && (
-        <div className="p-4 bg-red-950/40 border border-red-800 text-red-200 rounded-lg text-sm flex gap-2">
-          <span className="font-bold">⚠️ Error:</span>
-          <span>{error}</span>
+        <div className="flex items-start gap-3 rounded-lg border border-red-900/60 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+          <IconAlert size={16} className="mt-0.5 shrink-0 text-red-400" />
+          <div>
+            <div className="font-semibold text-red-100">Run failed</div>
+            <div className="text-red-300/90">{error}</div>
+          </div>
         </div>
       )}
     </div>

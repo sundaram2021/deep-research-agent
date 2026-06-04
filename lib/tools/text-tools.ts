@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export const text_summarize = tool(async ({ text, maxLength = 200 }) => {
   return text.slice(0, maxLength) + (text.length > maxLength ? "..." : "");
-}, { name: "text_summarize", description: "Summarize a text block", schema: z.object({ text: z.string(), maxLength: z.number().optional() }) });
+}, { name: "text_summarize", description: "Summarize a text block", schema: z.object({ text: z.string(), maxLength: z.number().default(200) }) });
 
 export const keyword_extract = tool(async ({ text }) => {
   const common = new Set(["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", "is", "are", "of"]);
