@@ -48,4 +48,19 @@ Your assigned bullet point:
 Investigate this bullet thoroughly. Use at least 3 searches, fetch full content from the best 1-2 sources, and return a JSON object with your findings.`;
 }
 
+export function buildFollowupPrompt(
+  topic: string,
+  directive: string,
+  reason: string
+): string {
+  return `Original research topic: "${topic}"
+
+This is a FOLLOW-UP investigation triggered by a gap found after the first research pass (reason: ${reason}).
+
+Gap to close:
+${directive}
+
+Investigate this specific gap. Run 2-3 targeted searches, fetch full content from the best 1-2 sources, and return a JSON object with your findings using the same schema as before. Cite only real sourceUrls you actually fetched.`;
+}
+
 export type { ResearchAgentOutput };

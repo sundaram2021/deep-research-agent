@@ -5,7 +5,9 @@ import { agentTools } from "../lib/tools/agent-tools";
 import {
   mainAgentPlanSchema,
   researchAgentOutputSchema,
+  reflectionSchema,
 } from "../lib/schemas/agent-schemas";
+import { SourcePool } from "../lib/agents/source-pool";
 import { getModelPair } from "../lib/models";
 import { z } from "zod";
 import assert from "node:assert";
@@ -114,6 +116,35 @@ function testModelPairCaches() {
   console.log("[PASS] testModelPairCaches");
 }
 
+function testSourcePoolDedup() {
+  const pool = new SourcePool();
+  pool.setContent("https://a.com", JSON.stringify({ url: "https://a.com", text: "A" }));
+  assert.ok(pool.getContent("https://a.com"), "cached content should be returned");
+  assert.strictEqual(pool.getContent("https://missing.com"), undefined, "uncached content is undefined");
+  pool.setSearch("k", "[1]");
+  assert.strictEqual(pool.getSearch("k"), "[1]", "cached search should be returned");
+  const stats = pool.stats();
+  assert.strictEqual(stats.uniqueUrls, 1);
+  assert.ok(stats.contentCacheHits >= 1, "content hit counter should increment");
+  console.log("[PASS] testSourcePoolDedup");
+}
+
+function testReflectionSchema() {
+  const ok = reflectionSchema.safeParse({
+    sufficient: false,
+    gaps: [{ bulletIndex: 0, directive: "Investigate X", reason: "coverage_gap" }],
+    notes: "needs more",
+  });
+  assert.ok(ok.success, "valid reflection should parse");
+  const bad = reflectionSchema.safeParse({
+    sufficient: false,
+    gaps: [{ bulletIndex: 1, directive: "x", reason: "not_a_reason" }],
+    notes: "",
+  });
+  assert.ok(!bad.success, "invalid reason should be rejected");
+  console.log("[PASS] testReflectionSchema");
+}
+
 async function runAllTests() {
   console.log("=== RUNNING UNIT TESTS ===");
   try {
@@ -122,6 +153,8 @@ async function runAllTests() {
     testSchemasRejectInvalid();
     testToolSchemasStrict();
     testModelPairCaches();
+    testSourcePoolDedup();
+    testReflectionSchema();
     console.log("=== ALL UNIT TESTS PASSED ===");
   } catch (err) {
     console.error("Unit Tests Failed:", err);

@@ -17,6 +17,9 @@ export type AgentEventType =
   | "model.end"
   | "tool.start"
   | "tool.end"
+  | "reflection.start"
+  | "reflection.end"
+  | "wave.start"
   | "final.content";
 
 export interface AgentEvent {

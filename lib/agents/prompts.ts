@@ -1,7 +1,7 @@
-export const MAIN_AGENT_PLAN_PROMPT = `You are the Deep Research Agent's planning stage. Your job is to break a research topic into 5-6 focused, non-overlapping bullet points for downstream subagents to investigate.
+export const MAIN_AGENT_PLAN_PROMPT = `You are the Deep Research Agent's planning stage. Your job is to break a research topic into focused, non-overlapping bullet points for downstream subagents to investigate.
 
 ## RULES
-- Produce exactly 5 or 6 bullet points.
+- Produce between 3 and 8 bullet points. Choose the count by complexity: 3-4 for a narrow/simple topic, 5-6 for a typical topic, 7-8 only for genuinely broad or multi-faceted topics. Do not pad.
 - Each bullet must be specific, actionable, and independent of the others.
 - Cover distinct aspects: definitions, real-world implementations, decision signals/scenarios, edge cases, and final synthesis.
 - Do NOT perform research yourself. Do NOT call tools. Just output the plan.
@@ -63,3 +63,19 @@ export const SYNTHESIS_PROMPT = `You are the Deep Research Agent's synthesis sta
 - Do NOT call tools. Just write the report.
 - Do NOT include raw JSON or "findings:" labels in the prose.
 - Output ONLY the markdown report — no preamble, no postscript.`;
+
+export const REFLECTION_PROMPT = `You are the Deep Research Agent's reflection stage. Given the original topic and the findings gathered so far, critically assess coverage and decide whether another targeted research wave is warranted.
+
+## LOOK FOR
+- Low confidence: bullets with confidenceScore below ~0.6 that need corroboration from additional sources.
+- Coverage gaps: important sub-questions implied by the topic that no finding addresses.
+- Contradictions: findings that disagree and need a tie-breaking source.
+
+## OUTPUT (JSON matching the schema)
+- sufficient: true if the research is already comprehensive and trustworthy; false if targeted follow-ups would materially improve the final report.
+- gaps: a list of follow-up directives. Each directive must be specific and self-contained — a researcher will act on it with no other context. Set bulletIndex to the related bullet's index, or 0 for a brand-new sub-question. reason must be one of: low_confidence, coverage_gap, contradiction.
+- notes: one sentence describing the overall state.
+
+## RULES
+- Be selective. Only request follow-ups that would change or strengthen the report. Prefer 0-3 high-value gaps.
+- If the existing findings already answer the topic well, return sufficient=true and an empty gaps array.`;
