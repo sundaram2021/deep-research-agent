@@ -36,11 +36,27 @@ export const csv_to_json = tool(async ({ csv }) => {
 }, { name: "csv_to_json", description: "Convert CSV text to a JSON array of objects", schema: z.object({ csv: z.string() }) });
 
 export const json_to_csv = tool(async ({ data }) => {
-  if (data.length === 0) return "";
-  const headers = Object.keys(data[0]);
-  const rows = data.map((obj) => headers.map((h) => JSON.stringify(obj[h] ?? "")).join(","));
-  return [headers.join(","), ...rows].join("\n");
-}, { name: "json_to_csv", description: "Convert an array of record objects to a CSV string. Pass data as a real array, not JSON.", schema: z.object({ data: z.array(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))) }) });
+  let rows: unknown;
+  try {
+    rows = JSON.parse(data);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const preview = data.slice(0, 80) + (data.length > 80 ? "..." : "");
+    return `Error: json_to_csv expected a JSON string but could not parse it: "${preview}" (${msg})`;
+  }
+  const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v);
+
+  if (!Array.isArray(rows) || !rows.every(isPlainObject)) {
+    return "Error: json_to_csv expected a JSON array of objects, e.g. '[{\"name\":\"Alice\",\"age\":30}]'.";
+  }
+  if (rows.length === 0) return "";
+  const headers = Object.keys(rows[0]);
+  const csvRows = rows.map((obj) =>
+    headers.map((h) => JSON.stringify(obj[h] ?? "")).join(",")
+  );
+  return [headers.join(","), ...csvRows].join("\n");
+}, { name: "json_to_csv", description: "Convert an array of record objects to a CSV string. Pass data as a JSON string of an array of flat objects, e.g. '[{\"name\":\"Alice\",\"age\":30},{\"name\":\"Bob\",\"age\":25}]'.", schema: z.object({ data: z.string() }) });
 
 export const calculate_stats = tool(async ({ numbers }) => {
   if (numbers.length === 0) return "No numbers provided";

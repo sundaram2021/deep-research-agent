@@ -1,4 +1,4 @@
-import { csv_to_json, calculate_stats } from "../lib/tools/data-tools";
+import { csv_to_json, json_to_csv, calculate_stats } from "../lib/tools/data-tools";
 import { getModelPair } from "../lib/models";
 import { buildResearcherPrompt } from "../lib/agents/researcher-agent";
 import { buildSynthesisMessages } from "../lib/agents/synthesis";
@@ -28,6 +28,26 @@ async function testToolComposition() {
   assert.strictEqual(stats.min, 10);
   assert.strictEqual(stats.max, 50);
   console.log("[PASS] Tool Composition Chain (csv_to_json -> calculate_stats)");
+}
+
+async function testJsonToCsvTool() {
+  const validResult = await json_to_csv.invoke({
+    data: '[{"name":"Alice","age":30},{"name":"Bob","age":25}]',
+  });
+  assert.strictEqual(validResult, 'name,age\n"Alice",30\n"Bob",25');
+
+  const emptyArrayResult = await json_to_csv.invoke({ data: "[]" });
+  assert.strictEqual(emptyArrayResult, "");
+
+  const invalidJsonResult = await json_to_csv.invoke({ data: "[{name:" });
+  assert.ok(invalidJsonResult.startsWith("Error: json_to_csv expected a JSON string but could not parse it:"));
+
+  const nonArrayJsonResult = await json_to_csv.invoke({ data: '{"name":"Alice"}' });
+  assert.strictEqual(
+    nonArrayJsonResult,
+    "Error: json_to_csv expected a JSON array of objects, e.g. '[{\"name\":\"Alice\",\"age\":30}]'.",
+  );
+  console.log("[PASS] json_to_csv Tool");
 }
 
 function testResearcherPrompt() {
@@ -81,6 +101,7 @@ async function runIntegrationTests() {
   console.log("=== RUNNING INTEGRATION TESTS ===");
   try {
     await testToolComposition();
+    await testJsonToCsvTool();
     testResearcherPrompt();
     testSynthesisMessages();
     testModelPairInitialized();
