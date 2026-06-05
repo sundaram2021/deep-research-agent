@@ -8,6 +8,8 @@ import {
   reflectionSchema,
 } from "../lib/schemas/agent-schemas";
 import { SourcePool } from "../lib/agents/source-pool";
+import { SearchRouter } from "../lib/search/router";
+import type { SearchProvider } from "../lib/search/types";
 import { getModelPair } from "../lib/models";
 import { z } from "zod";
 import assert from "node:assert";
@@ -145,6 +147,43 @@ function testReflectionSchema() {
   console.log("[PASS] testReflectionSchema");
 }
 
+async function testSearchRouterFallback() {
+  const failing: SearchProvider = {
+    name: "failing",
+    isConfigured: () => true,
+    search: async () => { throw new Error("provider down"); },
+  };
+  const working: SearchProvider = {
+    name: "working",
+    isConfigured: () => true,
+    search: async () => [{ title: "T", url: "https://x.com", content: "c", score: 0.9 }],
+  };
+  const empty: SearchProvider = {
+    name: "empty",
+    isConfigured: () => true,
+    search: async () => [],
+  };
+  const unconfigured: SearchProvider = {
+    name: "off",
+    isConfigured: () => false,
+    search: async () => { throw new Error("should not be called"); },
+  };
+
+  const r1 = await new SearchRouter([failing, working]).search("q");
+  assert.strictEqual(r1.provider, "working", "should fall back past a failing provider");
+  assert.strictEqual(r1.results.length, 1);
+
+  const r2 = await new SearchRouter([empty, working]).search("q");
+  assert.strictEqual(r2.provider, "working", "should skip empty results and try the next provider");
+
+  const r3 = await new SearchRouter([unconfigured, working]).search("q");
+  assert.strictEqual(r3.provider, "working", "should ignore unconfigured providers");
+
+  assert.strictEqual(new SearchRouter([unconfigured]).hasConfiguredProvider(), false);
+  assert.strictEqual(new SearchRouter([working]).hasConfiguredProvider(), true);
+  console.log("[PASS] testSearchRouterFallback");
+}
+
 async function runAllTests() {
   console.log("=== RUNNING UNIT TESTS ===");
   try {
@@ -155,6 +194,7 @@ async function runAllTests() {
     testModelPairCaches();
     testSourcePoolDedup();
     testReflectionSchema();
+    await testSearchRouterFallback();
     console.log("=== ALL UNIT TESTS PASSED ===");
   } catch (err) {
     console.error("Unit Tests Failed:", err);
