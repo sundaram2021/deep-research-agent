@@ -24,7 +24,10 @@ export interface ResearcherHandle {
   name: string;
 }
 
-export function createResearcherAgent(model: ChatOpenAI): ResearcherHandle {
+export function createResearcherAgent(
+  model: ChatOpenAI,
+  checkpointer?: unknown
+): ResearcherHandle {
   const agent = createDeepAgent({
     name: "researcher",
     model,
@@ -32,6 +35,10 @@ export function createResearcherAgent(model: ChatOpenAI): ResearcherHandle {
     subagents: [],
     systemPrompt: RESEARCHER_PROMPT,
     responseFormat: providerStrategy(researchAgentOutputSchema),
+    // Optional LangGraph checkpointer (opt-in; see lib/agents/checkpointer.ts).
+    ...(checkpointer
+      ? { checkpointer: checkpointer as NonNullable<Parameters<typeof createDeepAgent>[0]>["checkpointer"] }
+      : {}),
   }) as unknown as ResearcherHandle["agent"];
   return { agent, name: "researcher" };
 }

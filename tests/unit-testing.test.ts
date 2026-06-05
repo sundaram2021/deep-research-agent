@@ -10,6 +10,7 @@ import {
 import { SourcePool } from "../lib/agents/source-pool";
 import { SearchRouter } from "../lib/search/router";
 import type { SearchProvider } from "../lib/search/types";
+import { eventToRow, rowToEvent } from "../lib/jobs/job-store";
 import { getModelPair } from "../lib/models";
 import { z } from "zod";
 import assert from "node:assert";
@@ -88,7 +89,7 @@ function validateOpenAISchema(label: string, schema: z.ZodTypeAny, path = ""): s
     if (!required.has(key)) broken.push(`${label}${subPath}: missing required=[${key}]`);
     if (!hasType(sub)) broken.push(`${label}${subPath}: missing 'type' (OpenAI strict mode rejects z.any()/z.unknown())`);
     if (sub && typeof sub === "object" && "_def" in sub) {
-      broken.push(...validateOpenAISchema(label, sub as z.ZodTypeAny, subPath));
+      broken.push(...validateOpenAISchema(label, sub as unknown as z.ZodTypeAny, subPath));
     }
   }
   if (json.items && typeof json.items === "object" && "_def" in (json.items as object)) {
@@ -184,6 +185,30 @@ async function testSearchRouterFallback() {
   console.log("[PASS] testSearchRouterFallback");
 }
 
+function testJobEventRoundTrip() {
+  // Regression: replayed events must keep id/name/parent so the client can pair
+  // tool/subagent starts+ends and preserve parent scope on reconnect.
+  const ev = {
+    type: "tool.start",
+    id: "run-123",
+    name: "web_search",
+    parent: "subagent-2-1",
+    data: { args: { query: "x" } },
+    ts: 1717,
+  };
+  const back = rowToEvent(eventToRow("job-1", 5, ev));
+  assert.strictEqual(back.id, "run-123", "tool id preserved through persist + replay");
+  assert.strictEqual(back.name, "web_search", "tool name preserved");
+  assert.strictEqual(back.parent, "subagent-2-1", "parent scope preserved");
+  assert.strictEqual(back.type, "tool.start");
+  assert.strictEqual(back.seq, 5);
+
+  const minimal = rowToEvent(eventToRow("job-1", 6, { type: "synthesis.start", ts: 1 }));
+  assert.strictEqual(minimal.id, undefined, "absent id stays undefined (matches live publish)");
+  assert.strictEqual(minimal.parent, undefined, "absent parent stays undefined");
+  console.log("[PASS] testJobEventRoundTrip");
+}
+
 async function runAllTests() {
   console.log("=== RUNNING UNIT TESTS ===");
   try {
@@ -195,6 +220,7 @@ async function runAllTests() {
     testSourcePoolDedup();
     testReflectionSchema();
     await testSearchRouterFallback();
+    testJobEventRoundTrip();
     console.log("=== ALL UNIT TESTS PASSED ===");
   } catch (err) {
     console.error("Unit Tests Failed:", err);
