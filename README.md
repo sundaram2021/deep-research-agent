@@ -25,7 +25,7 @@ reflection ────────► find low-confidence bullets, coverage gap
   │                   → spawn targeted follow-up waves (budget-bounded)
   ▼
 synthesis ─────────► cited markdown report (Exec summary, per-bullet findings with
-                      confidence, Gaps & Open Questions, Sources, Conclusion)
+                      numbered [n] citations, Gaps & Open Questions, References, Conclusion)
 ```
 
 - **Providers**: web search/extract routes Tavily → Exa with automatic fallback.
