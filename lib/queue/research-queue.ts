@@ -10,6 +10,7 @@ export interface ResearchJobData {
   jobId: string;
   topic: string;
   bullets: unknown;
+  reportFormat?: "brief" | "deep";
 }
 
 let queue: Queue<ResearchJobData> | null = null;

@@ -8,13 +8,14 @@ import { Worker, type ConnectionOptions } from "bullmq";
 import { createQueueConnection } from "../lib/queue/connection";
 import { RESEARCH_QUEUE, type ResearchJobData } from "../lib/queue/research-queue";
 import { runResearchPipeline, type Emit } from "../lib/research/pipeline";
-import { appendEvent, setError, setResult, setStatus } from "../lib/jobs/job-store";
+import { appendEvent, isCancelled, setError, setResult, setStatus } from "../lib/jobs/job-store";
+import { CancelledError } from "../lib/utils/typed-errors";
 import type { BulletPoint } from "../lib/schemas/agent-schemas";
 
 const worker = new Worker<ResearchJobData>(
   RESEARCH_QUEUE,
   async (job) => {
-    const { jobId, topic, bullets } = job.data;
+    const { jobId, topic, bullets, reportFormat } = job.data;
     await setStatus(jobId, "running");
 
     // Serialize event persistence so seq order is preserved and every event is
@@ -32,11 +33,19 @@ const worker = new Worker<ResearchJobData>(
         topic,
         bullets: bullets as BulletPoint[],
         emit,
+        checkCancelled: () => isCancelled(jobId),
+        reportFormat,
       });
       emit({ type: "run.end", ts: Date.now() });
       await chain;
       await setResult(jobId, report);
     } catch (err) {
+      if (err instanceof CancelledError) {
+        emit({ type: "run.error", data: { message: "Research cancelled" }, ts: Date.now() });
+        await chain;
+        await setStatus(jobId, "cancelled");
+        return; // a cancelled job should not be retried
+      }
       const message = err instanceof Error ? err.message : String(err);
       emit({ type: "run.error", data: { message }, ts: Date.now() });
       await chain;

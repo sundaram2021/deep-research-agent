@@ -16,6 +16,8 @@ import { reflectOnResults } from "../agents/reflection";
 import { getCheckpointer } from "../agents/checkpointer";
 import { SourcePool, withSourcePool } from "../agents/source-pool";
 import { pLimit } from "../utils/network-helpers";
+import { TokenBudget } from "./budget";
+import { CancelledError } from "../utils/typed-errors";
 import type { BulletPoint, ResearchAgentOutput } from "../schemas/agent-schemas";
 
 export interface AgentEvent {
@@ -52,11 +54,15 @@ export interface PipelineInput {
   topic: string;
   bullets: BulletPoint[];
   emit: Emit;
+  // Cooperative cancellation, checked between waves and before synthesis.
+  checkCancelled?: () => boolean | Promise<boolean>;
+  // "deep" (default) full report, or "brief" executive summary.
+  reportFormat?: "brief" | "deep";
 }
 
 // Emits research.start ... research.complete. The caller owns run.start/run.end/
 // run.error so HTTP and worker lifecycles can differ. Returns the final report.
-export async function runResearchPipeline({ topic, bullets, emit }: PipelineInput): Promise<string> {
+export async function runResearchPipeline({ topic, bullets, emit, checkCancelled, reportFormat }: PipelineInput): Promise<string> {
   const pool = new SourcePool();
   return withSourcePool(pool, async () => {
     emit({ type: "research.start", ts: Date.now() });
@@ -68,6 +74,12 @@ export async function runResearchPipeline({ topic, bullets, emit }: PipelineInpu
     const maxWaves = Math.max(1, Number(process.env.RESEARCH_MAX_WAVES) || DEFAULT_MAX_WAVES);
     const maxFollowups = Math.max(1, Number(process.env.RESEARCH_MAX_FOLLOWUPS) || DEFAULT_MAX_FOLLOWUPS);
     const limit = pLimit(concurrency);
+    const budget = new TokenBudget(Number(process.env.RESEARCH_TOKEN_BUDGET) || 0);
+    const onUsage = (tokens: number) => budget.add(tokens);
+    const ensureNotCancelled = async () => {
+      if (checkCancelled && (await checkCancelled())) throw new CancelledError("Research cancelled");
+    };
+    await ensureNotCancelled();
 
     // --- Wave 1: one researcher per planned bullet ---
     const wave1Tasks: SubagentTask[] = bullets.map((bullet) => ({
@@ -77,7 +89,7 @@ export async function runResearchPipeline({ topic, bullets, emit }: PipelineInpu
       bulletIndex: bullet.index,
       bulletTitle: bullet.title,
     }));
-    const wave1 = await runWave(handle, extractor, emit, limit, wave1Tasks);
+    const wave1 = await runWave(handle, extractor, emit, limit, wave1Tasks, onUsage);
 
     const resultsMap = new Map<number, ResearchAgentOutput>();
     for (const run of wave1) if (run.output) resultsMap.set(run.output.bulletIndex, run.output);
@@ -91,6 +103,11 @@ export async function runResearchPipeline({ topic, bullets, emit }: PipelineInpu
     let nextIndex = bullets.reduce((m, b) => Math.max(m, b.index), 0) + 1;
     let wave = 1;
     while (wave < maxWaves) {
+      await ensureNotCancelled();
+      if (budget.exceeded()) {
+        emit({ type: "budget.exceeded", data: { used: budget.total, limit: budget.max }, ts: Date.now() });
+        break;
+      }
       emit({ type: "reflection.start", data: { wave }, ts: Date.now() });
       const reflection = await reflectOnResults(main, topic, [...resultsMap.values()], maxFollowups);
       emit({
@@ -115,11 +132,12 @@ export async function runResearchPipeline({ topic, bullets, emit }: PipelineInpu
           bulletTitle: title,
         };
       });
-      const followRuns = await runWave(handle, extractor, emit, limit, followTasks);
+      const followRuns = await runWave(handle, extractor, emit, limit, followTasks, onUsage);
       for (const run of followRuns) if (run.output) mergeOutput(resultsMap, run.output);
     }
 
     // --- Synthesis ---
+    await ensureNotCancelled();
     const results = [...resultsMap.values()].sort((a, b) => a.bulletIndex - b.bulletIndex);
     emit({ type: "synthesis.start", ts: Date.now() });
 
@@ -128,7 +146,8 @@ export async function runResearchPipeline({ topic, bullets, emit }: PipelineInpu
     for await (const token of streamSynthesis(
       main,
       { plan: { originalTopic: topic, bulletPoints: bullets, summary: "" }, results },
-      aborted.signal
+      aborted.signal,
+      reportFormat ?? "deep"
     )) {
       assembled += token;
       emit({ type: "synthesis.token", data: { text: token }, ts: Date.now() });
@@ -150,16 +169,18 @@ async function runWave(
   repairModel: ChatOpenAI,
   emit: Emit,
   limit: <T>(fn: () => Promise<T>) => Promise<T>,
-  tasks: SubagentTask[]
+  tasks: SubagentTask[],
+  onUsage: (tokens: number) => void
 ): Promise<SubagentRun[]> {
-  return Promise.all(tasks.map((task) => limit(() => runSubagent(handle, repairModel, emit, task))));
+  return Promise.all(tasks.map((task) => limit(() => runSubagent(handle, repairModel, emit, task, onUsage))));
 }
 
 async function runSubagent(
   handle: ReturnType<typeof createResearcherAgent>,
   repairModel: ChatOpenAI,
   emit: Emit,
-  task: SubagentTask
+  task: SubagentTask,
+  onUsage: (tokens: number) => void
 ): Promise<SubagentRun> {
   const { runId, prompt, bullet, bulletIndex, bulletTitle } = task;
   emit({ type: "subagent.start", id: runId, name: handle.name, data: { bullet }, ts: Date.now() });
@@ -177,6 +198,8 @@ async function runSubagent(
           emit({ type: "model.token", id: runId, parent: handle.name, data: { text }, ts: Date.now() });
         }
       } else if (ev.event === "on_chat_model_end") {
+        const out = ev.data?.output as { usage_metadata?: { total_tokens?: number } } | undefined;
+        if (typeof out?.usage_metadata?.total_tokens === "number") onUsage(out.usage_metadata.total_tokens);
         const finalText = extractText(ev.data?.output);
         if (finalText) lastText = finalText;
       } else if (ev.event === "on_tool_start") {
