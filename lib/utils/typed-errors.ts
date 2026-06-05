@@ -37,3 +37,6 @@ export class SubagentError extends AppError {
     this.bulletIndex = bulletIndex;
   }
 }
+
+/** A job was cancelled cooperatively (distinct from a failure). */
+export class CancelledError extends AppError {}

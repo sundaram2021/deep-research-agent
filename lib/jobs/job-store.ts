@@ -110,6 +110,19 @@ export async function appendEvent(jobId: string, event: AgentEvent): Promise<voi
   await publisher().publish(jobChannel(jobId), JSON.stringify({ ...event, seq }));
 }
 
+// Cooperative cancellation flag (checked by the worker/pipeline between waves).
+export async function requestCancel(jobId: string): Promise<void> {
+  await publisher().set(`job:cancel:${jobId}`, "1", "EX", 3600);
+}
+
+export async function isCancelled(jobId: string): Promise<boolean> {
+  try {
+    return (await publisher().get(`job:cancel:${jobId}`)) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export async function getEvents(jobId: string, afterSeq = 0) {
   return getDb()
     .select()
