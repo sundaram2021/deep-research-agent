@@ -91,10 +91,6 @@ export function pLimit(concurrency: number): LimitFn {
       else queue.push(start);
     });
   };
-      if (active < concurrency) start();
-      else queue.push(start);
-    });
-  };
 }
 
 /** Serializes calls with a minimum interval between them (req/sec throttling). */
