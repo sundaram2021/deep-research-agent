@@ -187,6 +187,19 @@ export function applyEvent(
       return;
     }
 
+    case "budget.exceeded": {
+      const used = typeof getData(ev).used === "number" ? (getData(ev).used as number) : 0;
+      updateTurn((t) => {
+        t.entries.push({
+          kind: "thought",
+          id: crypto.randomUUID(),
+          ts: ev.ts,
+          text: `Token budget reached (${used} tokens) — stopping further research waves.`,
+        });
+      });
+      return;
+    }
+
     case "model.token": {
       if (!isParentScope(ev.parent)) return;
       const text = strField(ev, "text") ?? "";

@@ -2,6 +2,9 @@ import { searchTools } from "../lib/tools/search-tools";
 import { textTools } from "../lib/tools/text-tools";
 import { dataTools } from "../lib/tools/data-tools";
 import { agentTools } from "../lib/tools/agent-tools";
+import { knowledgeTools } from "../lib/tools/knowledge-tools";
+import { cosineSimilarity } from "../lib/agents/embeddings";
+import { findDuplicateIndices } from "../lib/research/vector-store";
 import {
   mainAgentPlanSchema,
   researchAgentOutputSchema,
@@ -16,7 +19,8 @@ import { z } from "zod";
 import assert from "node:assert";
 
 function testToolRegistry() {
-  const totalTools = searchTools.length + textTools.length + dataTools.length + agentTools.length;
+  const totalTools =
+    searchTools.length + textTools.length + dataTools.length + agentTools.length + knowledgeTools.length;
   // Phase 0 removed mock/noise tools (get_domain_rank, list_search_engines) and
   // replaced others with real implementations. We favor real, honest tools over a
   // padded count, so the floor is 40 rather than the original 50.
@@ -63,7 +67,7 @@ function testSchemasRejectInvalid() {
 }
 
 function testToolSchemasStrict() {
-  const allTools = [...searchTools, ...textTools, ...dataTools, ...agentTools];
+  const allTools = [...searchTools, ...textTools, ...dataTools, ...agentTools, ...knowledgeTools];
   const broken: string[] = [];
 
   for (const t of allTools) {
@@ -209,6 +213,15 @@ function testJobEventRoundTrip() {
   console.log("[PASS] testJobEventRoundTrip");
 }
 
+function testVectorMath() {
+  assert.ok(Math.abs(cosineSimilarity([1, 0, 0], [1, 0, 0]) - 1) < 1e-9, "identical vectors -> 1");
+  assert.ok(Math.abs(cosineSimilarity([1, 0], [0, 1])) < 1e-9, "orthogonal vectors -> 0");
+  assert.strictEqual(cosineSimilarity([1, 2, 3], []), 0, "length mismatch -> 0");
+  const dups = findDuplicateIndices([[1, 0, 0], [1, 0, 0], [0, 1, 0]], 0.95);
+  assert.deepStrictEqual(dups, [1], "second identical vector flagged as duplicate");
+  console.log("[PASS] testVectorMath");
+}
+
 async function runAllTests() {
   console.log("=== RUNNING UNIT TESTS ===");
   try {
@@ -221,6 +234,7 @@ async function runAllTests() {
     testReflectionSchema();
     await testSearchRouterFallback();
     testJobEventRoundTrip();
+    testVectorMath();
     console.log("=== ALL UNIT TESTS PASSED ===");
   } catch (err) {
     console.error("Unit Tests Failed:", err);
