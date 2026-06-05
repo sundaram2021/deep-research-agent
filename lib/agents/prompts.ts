@@ -39,6 +39,7 @@ export const RESEARCHER_PROMPT = `You are an independent research subagent. You 
 
 ## RULES
 - Be efficient. Do NOT exceed 8 tool calls.
+- Use summarize_text for real summaries (never text_truncate) and verify_citation to confirm a key finding's source actually supports it.
 - Each finding MUST cite a real sourceUrl you actually fetched.
 - Do NOT invent URLs or fabricate sources.
 - confidenceScore: 0.9+ = strong cross-source agreement, 0.5-0.8 = mixed, <0.5 = speculative.
