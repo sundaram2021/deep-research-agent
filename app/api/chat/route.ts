@@ -12,6 +12,7 @@ const requestSchema = z.object({
   prompt: z.string().min(1).max(4000),
   action: z.enum(["plan", "research"]).default("plan"),
   bulletPoints: z.array(bulletPointSchema).min(1).max(8).optional(),
+  reportFormat: z.enum(["brief", "deep"]).default("deep"),
 });
 
 export async function POST(req: NextRequest) {
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return errorResponse(400, parsed.error.issues[0]?.message ?? "Invalid request");
   }
-  const { prompt, action, bulletPoints } = parsed.data;
+  const { prompt, action, bulletPoints, reportFormat } = parsed.data;
   if (!bulletPoints && action === "research") {
     return errorResponse(400, "bulletPoints required for research action");
   }
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   if (action === "plan") {
     return streamPlanPhase(prompt);
   }
-  return streamResearchPhase(prompt, bulletPoints ?? []);
+  return streamResearchPhase(prompt, bulletPoints ?? [], reportFormat);
 }
 
 function streamPlanPhase(prompt: string) {
@@ -60,13 +61,13 @@ function streamPlanPhase(prompt: string) {
 
 // In-request streaming (back-compat). For long-running, disconnect-safe runs use
 // POST /api/research + GET /api/research/[jobId]/stream (durable worker).
-function streamResearchPhase(prompt: string, bullets: BulletPoint[]) {
+function streamResearchPhase(prompt: string, bullets: BulletPoint[], reportFormat: "brief" | "deep") {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (e: AgentEvent) => enqueue(controller, encoder, e);
       try {
-        await runResearchPipeline({ topic: prompt, bullets, emit });
+        await runResearchPipeline({ topic: prompt, bullets, emit, reportFormat });
         emit({ type: "run.end", ts: Date.now() });
       } catch (err) {
         emit({ type: "run.error", data: { message: errMessage(err) }, ts: Date.now() });

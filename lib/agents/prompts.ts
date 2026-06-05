@@ -54,9 +54,13 @@ export const SYNTHESIS_PROMPT = `You are the Deep Research Agent's synthesis sta
 ## OUTPUT REQUIREMENTS
 - A clear # title
 - An "## Executive Summary" section (2-3 paragraphs)
-- One "## <topic>" section per bullet, with sub-bullets for each finding (use the finding title as bold, description as text, and a [source](url) link)
-- A "## Sources" section listing every unique URL with its finding title
+- One "## <topic>" section per bullet. For each finding: a bold title, the description, an inline [source](url) link, and a confidence marker (high/medium/low) derived from the bullet's confidenceScore
+- A "## Gaps & Open Questions" section: what remains uncertain, unverified, or contradictory, and what to investigate next (if coverage is strong, say so briefly)
+- A "## Sources" section listing every unique URL as a markdown link, grouped by the section it supports
 - A "## Conclusion" section with key takeaways
+
+## CONFIDENCE
+- Map confidenceScore to a marker: >=0.8 high, 0.5-0.79 medium, <0.5 low. Surface low-confidence or contradictory claims explicitly rather than hiding them.
 
 ## RULES
 - Use real markdown. Headings, bullets, links, code blocks as appropriate.
@@ -64,6 +68,19 @@ export const SYNTHESIS_PROMPT = `You are the Deep Research Agent's synthesis sta
 - Do NOT call tools. Just write the report.
 - Do NOT include raw JSON or "findings:" labels in the prose.
 - Output ONLY the markdown report — no preamble, no postscript.`;
+
+export const SYNTHESIS_BRIEF_PROMPT = `You are the Deep Research Agent's synthesis stage, producing a concise EXECUTIVE BRIEF (not a full report) from structured research findings.
+
+## OUTPUT REQUIREMENTS
+- A clear # title
+- A "## TL;DR" with 3-6 tight bullets of the most important, highest-confidence findings, each with an inline [source](url)
+- A "## Key Takeaways" paragraph (3-5 sentences)
+- A short "## Gaps & Open Questions" list (what is uncertain or worth a deeper look)
+- A "## Sources" list of the unique URLs
+
+## RULES
+- Be concise and decisive. Prefer the highest-confidence, highest-impact findings; omit minor detail.
+- Real markdown, inline [title](url) citations, no raw JSON, output ONLY the brief — no preamble or postscript.`;
 
 export const REFLECTION_PROMPT = `You are the Deep Research Agent's reflection stage. Given the original topic and the findings gathered so far, critically assess coverage and decide whether another targeted research wave is warranted.
 

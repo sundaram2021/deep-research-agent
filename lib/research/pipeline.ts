@@ -56,11 +56,13 @@ export interface PipelineInput {
   emit: Emit;
   // Cooperative cancellation, checked between waves and before synthesis.
   checkCancelled?: () => boolean | Promise<boolean>;
+  // "deep" (default) full report, or "brief" executive summary.
+  reportFormat?: "brief" | "deep";
 }
 
 // Emits research.start ... research.complete. The caller owns run.start/run.end/
 // run.error so HTTP and worker lifecycles can differ. Returns the final report.
-export async function runResearchPipeline({ topic, bullets, emit, checkCancelled }: PipelineInput): Promise<string> {
+export async function runResearchPipeline({ topic, bullets, emit, checkCancelled, reportFormat }: PipelineInput): Promise<string> {
   const pool = new SourcePool();
   return withSourcePool(pool, async () => {
     emit({ type: "research.start", ts: Date.now() });
@@ -144,7 +146,8 @@ export async function runResearchPipeline({ topic, bullets, emit, checkCancelled
     for await (const token of streamSynthesis(
       main,
       { plan: { originalTopic: topic, bulletPoints: bullets, summary: "" }, results },
-      aborted.signal
+      aborted.signal,
+      reportFormat ?? "deep"
     )) {
       assembled += token;
       emit({ type: "synthesis.token", data: { text: token }, ts: Date.now() });

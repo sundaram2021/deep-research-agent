@@ -15,6 +15,7 @@ export const runtime = "nodejs";
 const schema = z.object({
   prompt: z.string().min(1).max(4000),
   bulletPoints: z.array(bulletPointSchema).min(1).max(8),
+  reportFormat: z.enum(["brief", "deep"]).default("deep"),
 });
 
 export async function POST(req: NextRequest) {
@@ -35,11 +36,11 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return json(400, { error: parsed.error.issues[0]?.message ?? "Invalid request" });
   }
-  const { prompt, bulletPoints } = parsed.data;
+  const { prompt, bulletPoints, reportFormat } = parsed.data;
 
   try {
     const jobId = await createJob(prompt, bulletPoints);
-    await getResearchQueue().add(RESEARCH_QUEUE, { jobId, topic: prompt, bullets: bulletPoints });
+    await getResearchQueue().add(RESEARCH_QUEUE, { jobId, topic: prompt, bullets: bulletPoints, reportFormat });
     return json(202, { jobId });
   } catch (err) {
     return json(500, { error: err instanceof Error ? err.message : String(err) });

@@ -15,7 +15,7 @@ import type { BulletPoint } from "../lib/schemas/agent-schemas";
 const worker = new Worker<ResearchJobData>(
   RESEARCH_QUEUE,
   async (job) => {
-    const { jobId, topic, bullets } = job.data;
+    const { jobId, topic, bullets, reportFormat } = job.data;
     await setStatus(jobId, "running");
 
     // Serialize event persistence so seq order is preserved and every event is
@@ -34,6 +34,7 @@ const worker = new Worker<ResearchJobData>(
         bullets: bullets as BulletPoint[],
         emit,
         checkCancelled: () => isCancelled(jobId),
+        reportFormat,
       });
       emit({ type: "run.end", ts: Date.now() });
       await chain;
