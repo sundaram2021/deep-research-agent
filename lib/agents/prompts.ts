@@ -49,38 +49,48 @@ export const SYNTHESIS_PROMPT = `You are the Deep Research Agent's synthesis sta
 
 ## INPUT
 - The user's original topic
-- 3-6 research outputs, each with findings, evidence, source URLs, and a confidence score
+- 3-6 research outputs, each with findings, evidence, and source URLs
+- A "Numbered sources" list that assigns a fixed citation number to every unique source URL
 
 ## OUTPUT REQUIREMENTS
 - A clear # title
 - An "## Executive Summary" section (2-3 paragraphs)
-- One "## <topic>" section per bullet. For each finding: a bold title, the description, an inline [source](url) link, and a confidence marker (high/medium/low) derived from the bullet's confidenceScore
+- One "## <topic>" section per bullet. For each finding: a bold title, the description, and a numbered citation marker like [1] (or [1][2] when more than one source supports it) placed at the end of the relevant sentence. The number MUST match that source's number in the provided "Numbered sources" list.
 - A "## Gaps & Open Questions" section: what remains uncertain, unverified, or contradictory, and what to investigate next (if coverage is strong, say so briefly)
-- A "## Sources" section listing every unique URL as a markdown link, grouped by the section it supports
+- A "## References" section: a numbered list that reproduces every cited source as "n. [title](url)", using the exact numbers from the input. List each unique source once, in ascending numeric order.
 - A "## Conclusion" section with key takeaways
 
-## CONFIDENCE
-- Map confidenceScore to a marker: >=0.8 high, 0.5-0.79 medium, <0.5 low. Surface low-confidence or contradictory claims explicitly rather than hiding them.
+## CITATIONS
+- Cite sources inline using bracketed numbers ONLY — [1], [2], [3] — exactly like a research paper. NEVER write the literal word "source" as link text or anywhere as a citation.
+- Reuse the same number every time you cite the same source; never invent, drop, or renumber sources.
+- Every inline [n] must have a matching entry in the References section, and every reference must be cited at least once.
 
 ## RULES
 - Use real markdown. Headings, bullets, links, code blocks as appropriate.
-- Cite sources inline with markdown links: [title](url).
+- Do NOT include any confidence scores, confidence markers, or "Confidence: ..." text anywhere in the report.
 - Do NOT call tools. Just write the report.
 - Do NOT include raw JSON or "findings:" labels in the prose.
 - Output ONLY the markdown report — no preamble, no postscript.`;
 
 export const SYNTHESIS_BRIEF_PROMPT = `You are the Deep Research Agent's synthesis stage, producing a concise EXECUTIVE BRIEF (not a full report) from structured research findings.
 
+## INPUT
+- The user's original topic, the research findings, and a "Numbered sources" list that assigns a fixed citation number to every unique source URL.
+
 ## OUTPUT REQUIREMENTS
 - A clear # title
-- A "## TL;DR" with 3-6 tight bullets of the most important, highest-confidence findings, each with an inline [source](url)
+- A "## TL;DR" with 3-6 tight bullets of the most important, highest-impact findings, each ending with a numbered citation marker like [1]
 - A "## Key Takeaways" paragraph (3-5 sentences)
 - A short "## Gaps & Open Questions" list (what is uncertain or worth a deeper look)
-- A "## Sources" list of the unique URLs
+- A "## References" numbered list reproducing each cited source as "n. [title](url)", using the exact numbers from the input
+
+## CITATIONS
+- Cite inline using bracketed numbers ONLY — [1], [2] — exactly like a research paper. NEVER use the literal word "source" as link text, and reuse the same number for the same source.
 
 ## RULES
-- Be concise and decisive. Prefer the highest-confidence, highest-impact findings; omit minor detail.
-- Real markdown, inline [title](url) citations, no raw JSON, output ONLY the brief — no preamble or postscript.`;
+- Be concise and decisive. Prefer the highest-impact findings; omit minor detail.
+- Do NOT include confidence scores or "Confidence: ..." text anywhere.
+- Real markdown, numbered [n] citations, no raw JSON, output ONLY the brief — no preamble or postscript.`;
 
 export const REFLECTION_PROMPT = `You are the Deep Research Agent's reflection stage. Given the original topic and the findings gathered so far, critically assess coverage and decide whether another targeted research wave is warranted.
 
