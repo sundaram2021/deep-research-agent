@@ -43,12 +43,14 @@ export const get_content_exa = tool(async ({ urls }) => {
   const pool = currentSourcePool();
   const out: unknown[] = [];
   const missing: string[] = [];
+  const missingSet = new Set<string>();
   for (const url of urls) {
     const hit = pool?.getContent(url);
     if (hit !== undefined) {
       try { out.push(JSON.parse(hit)); } catch { out.push({ url, text: hit }); }
-    } else {
+    } else if (!missingSet.has(url)) {
       missing.push(url);
+      missingSet.add(url);
     }
   }
   if (missing.length > 0) {
