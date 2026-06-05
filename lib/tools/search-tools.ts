@@ -60,10 +60,7 @@ export const get_content_exa = tool(async ({ urls }) => {
         out.push(r);
       }
     } catch (err) {
-      return JSON.stringify({
-        results: out,
-        error: `get_content_exa failed for ${missing.length} uncached url(s): ${err instanceof Error ? err.message : String(err)}`,
-      });
+      return `Error: get_content_exa failed for ${missing.length} uncached url(s) (${err instanceof Error ? err.message : String(err)})`;
     }
   }
   return JSON.stringify(out);
