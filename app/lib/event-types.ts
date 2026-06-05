@@ -20,6 +20,7 @@ export type AgentEventType =
   | "reflection.start"
   | "reflection.end"
   | "wave.start"
+  | "budget.exceeded"
   | "final.content";
 
 export interface AgentEvent {
