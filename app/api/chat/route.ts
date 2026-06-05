@@ -5,10 +5,13 @@ import { getModelPair } from "../../../lib/models";
 import { generateResearchPlan } from "../../../lib/agents/main-agent";
 import {
   buildResearcherPrompt,
+  buildFollowupPrompt,
   createResearcherAgent,
 } from "../../../lib/agents/researcher-agent";
 import { streamSynthesis } from "../../../lib/agents/synthesis";
 import { extractResearchOutput } from "../../../lib/agents/researcher-output";
+import { reflectOnResults } from "../../../lib/agents/reflection";
+import { SourcePool, withSourcePool } from "../../../lib/agents/source-pool";
 import { pLimit } from "../../../lib/utils/network-helpers";
 import {
   bulletPointSchema,
@@ -20,13 +23,14 @@ import { extractText, extractToolContent } from "./stream-helpers";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-// Cap fan-out so a wide plan does not blow provider rate limits / credits.
 const DEFAULT_CONCURRENCY = 3;
+const DEFAULT_MAX_WAVES = 2; // wave 1 + up to (MAX_WAVES - 1) reflection-driven waves
+const DEFAULT_MAX_FOLLOWUPS = 3; // gaps investigated per reflection wave
 
 const requestSchema = z.object({
   prompt: z.string().min(1).max(4000),
   action: z.enum(["plan", "research"]).default("plan"),
-  bulletPoints: z.array(bulletPointSchema).min(1).max(6).optional(),
+  bulletPoints: z.array(bulletPointSchema).min(1).max(8).optional(),
 });
 
 interface AgentEvent {
@@ -36,6 +40,23 @@ interface AgentEvent {
   parent?: string | null;
   data?: unknown;
   ts: number;
+}
+
+type Emit = (event: AgentEvent) => void;
+
+interface SubagentTask {
+  runId: string;
+  prompt: string;
+  bullet: BulletPoint;
+  bulletIndex: number;
+  bulletTitle: string;
+}
+
+interface SubagentRun {
+  bulletIndex: number;
+  bulletTitle: string;
+  output: ResearchAgentOutput | null;
+  error?: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -83,18 +104,10 @@ function streamPlanPhase(
         send(controller, { type: "run.start", ts: Date.now() });
         const { main } = getModelPair();
         const { plan, raw } = await generateResearchPlan(main, prompt);
-        send(controller, {
-          type: "plan.ready",
-          data: { plan, raw },
-          ts: Date.now(),
-        });
+        send(controller, { type: "plan.ready", data: { plan, raw }, ts: Date.now() });
         send(controller, { type: "run.end", ts: Date.now() });
       } catch (err) {
-        send(controller, {
-          type: "run.error",
-          data: { message: errMessage(err) },
-          ts: Date.now(),
-        });
+        send(controller, { type: "run.error", data: { message: errMessage(err) }, ts: Date.now() });
       } finally {
         controller.close();
       }
@@ -110,80 +123,100 @@ function streamResearchPhase(
 ) {
   const stream = new ReadableStream({
     async start(controller) {
+      const emit: Emit = (event) => send(controller, event);
+      const pool = new SourcePool();
       try {
-        send(controller, { type: "research.start", ts: Date.now() });
+        await withSourcePool(pool, async () => {
+          emit({ type: "research.start", ts: Date.now() });
 
-        const { main, researcher } = getModelPair();
-        const handle = createResearcherAgent(researcher);
+          const { main, researcher } = getModelPair();
+          const handle = createResearcherAgent(researcher);
+          const concurrency = Math.max(1, Number(process.env.RESEARCH_CONCURRENCY) || DEFAULT_CONCURRENCY);
+          const maxWaves = Math.max(1, Number(process.env.RESEARCH_MAX_WAVES) || DEFAULT_MAX_WAVES);
+          const maxFollowups = Math.max(1, Number(process.env.RESEARCH_MAX_FOLLOWUPS) || DEFAULT_MAX_FOLLOWUPS);
+          const limit = pLimit(concurrency);
 
-        const subagentResults = await runResearchersInParallel(
-          handle,
-          prompt,
-          bullets,
-          controller,
-          send,
-          researcher
-        );
+          // --- Wave 1: one researcher per planned bullet ---
+          const wave1Tasks: SubagentTask[] = bullets.map((bullet) => ({
+            runId: `subagent-${bullet.index}-${Date.now()}`,
+            prompt: buildResearcherPrompt(prompt, bullet),
+            bullet,
+            bulletIndex: bullet.index,
+            bulletTitle: bullet.title,
+          }));
+          const wave1 = await runWave(handle, researcher, emit, limit, wave1Tasks);
 
-        const failed = subagentResults.filter((r) => !r.output);
-        if (subagentResults.length === 0) {
-          throw new Error("No research results were produced");
-        }
+          const resultsMap = new Map<number, ResearchAgentOutput>();
+          for (const run of wave1) if (run.output) resultsMap.set(run.output.bulletIndex, run.output);
+          const failedWave1 = wave1.filter((r) => !r.output).length;
 
-        const results: ResearchAgentOutput[] = [];
-        for (const r of subagentResults) {
-          if (r.output) results.push(r.output);
-        }
+          if (resultsMap.size === 0) {
+            throw new Error("All subagent research failed; cannot synthesize");
+          }
 
-        if (results.length === 0) {
-          throw new Error("All subagent research failed; cannot synthesize");
-        }
+          // --- Reflection-driven follow-up waves ---
+          let nextIndex = bullets.reduce((m, b) => Math.max(m, b.index), 0) + 1;
+          let wave = 1;
+          while (wave < maxWaves) {
+            emit({ type: "reflection.start", data: { wave }, ts: Date.now() });
+            const reflection = await reflectOnResults(
+              main,
+              prompt,
+              [...resultsMap.values()],
+              maxFollowups
+            );
+            emit({
+              type: "reflection.end",
+              data: { sufficient: reflection.sufficient, gaps: reflection.gaps.length, notes: reflection.notes },
+              ts: Date.now(),
+            });
+            if (reflection.sufficient || reflection.gaps.length === 0) break;
 
-        send(controller, {
-          type: "synthesis.start",
-          ts: Date.now(),
+            wave++;
+            emit({ type: "wave.start", data: { wave, count: reflection.gaps.length }, ts: Date.now() });
+
+            const followTasks: SubagentTask[] = reflection.gaps.map((gap) => {
+              const attach = gap.bulletIndex > 0 && resultsMap.has(gap.bulletIndex);
+              const targetIndex = attach ? gap.bulletIndex : nextIndex++;
+              const title = attach ? resultsMap.get(gap.bulletIndex)!.bulletTitle : shortTitle(gap.directive);
+              return {
+                runId: `followup-${targetIndex}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                prompt: buildFollowupPrompt(prompt, gap.directive, gap.reason),
+                bullet: { index: targetIndex, title, description: gap.directive },
+                bulletIndex: targetIndex,
+                bulletTitle: title,
+              };
+            });
+            const followRuns = await runWave(handle, researcher, emit, limit, followTasks);
+            for (const run of followRuns) if (run.output) mergeOutput(resultsMap, run.output);
+          }
+
+          // --- Synthesis ---
+          const results = [...resultsMap.values()].sort((a, b) => a.bulletIndex - b.bulletIndex);
+          emit({ type: "synthesis.start", ts: Date.now() });
+
+          const aborted = new AbortController();
+          let assembled = "";
+          for await (const token of streamSynthesis(
+            main,
+            { plan: { originalTopic: prompt, bulletPoints: bullets, summary: "" }, results },
+            aborted.signal
+          )) {
+            assembled += token;
+            emit({ type: "synthesis.token", data: { text: token }, ts: Date.now() });
+          }
+
+          if (failedWave1 > 0) {
+            assembled += `\n\n> ⚠️ ${failedWave1} of ${bullets.length} initial subagents failed; their bullet point(s) may be missing from this report.\n`;
+          }
+
+          emit({ type: "final.content", data: { text: assembled }, ts: Date.now() });
+          emit({ type: "synthesis.end", ts: Date.now() });
+          emit({ type: "research.complete", data: { sourcePool: pool.stats(), waves: wave }, ts: Date.now() });
+          emit({ type: "run.end", ts: Date.now() });
         });
-
-        const aborted = new AbortController();
-        let assembled = "";
-        for await (const token of streamSynthesis(
-          main,
-          {
-            plan: {
-              originalTopic: prompt,
-              bulletPoints: bullets,
-              summary: "",
-            },
-            results,
-          },
-          aborted.signal
-        )) {
-          assembled += token;
-          send(controller, {
-            type: "synthesis.token",
-            data: { text: token },
-            ts: Date.now(),
-          });
-        }
-
-        if (failed.length > 0) {
-          assembled += `\n\n> ⚠️ ${failed.length} of ${bullets.length} subagents failed. Their bullet point(s) are missing from this report.\n`;
-        }
-
-        send(controller, {
-          type: "final.content",
-          data: { text: assembled },
-          ts: Date.now(),
-        });
-        send(controller, { type: "synthesis.end", ts: Date.now() });
-        send(controller, { type: "research.complete", ts: Date.now() });
-        send(controller, { type: "run.end", ts: Date.now() });
       } catch (err) {
-        send(controller, {
-          type: "run.error",
-          data: { message: errMessage(err) },
-          ts: Date.now(),
-        });
+        emit({ type: "run.error", data: { message: errMessage(err) }, ts: Date.now() });
       } finally {
         controller.close();
       }
@@ -192,120 +225,105 @@ function streamResearchPhase(
   return sseResponse(stream);
 }
 
-interface SubagentRun {
-  bulletIndex: number;
-  bulletTitle: string;
-  output: ResearchAgentOutput | null;
-  error?: string;
+async function runWave(
+  handle: ReturnType<typeof createResearcherAgent>,
+  model: ChatOpenAI,
+  emit: Emit,
+  limit: <T>(fn: () => Promise<T>) => Promise<T>,
+  tasks: SubagentTask[]
+): Promise<SubagentRun[]> {
+  return Promise.all(tasks.map((task) => limit(() => runSubagent(handle, model, emit, task))));
 }
 
-async function runResearchersInParallel(
+async function runSubagent(
   handle: ReturnType<typeof createResearcherAgent>,
-  topic: string,
-  bullets: BulletPoint[],
-  controller: ReadableStreamDefaultController,
-  send: (c: ReadableStreamDefaultController, e: AgentEvent) => void,
-  researcherModel: ChatOpenAI
-): Promise<SubagentRun[]> {
-  const concurrency = Math.max(
-    1,
-    Number(process.env.RESEARCH_CONCURRENCY) || DEFAULT_CONCURRENCY
-  );
-  const limit = pLimit(concurrency);
-
-  const runOne = async (bullet: BulletPoint): Promise<SubagentRun> => {
-    const runId = `subagent-${bullet.index}-${Date.now()}`;
-    const prompt = buildResearcherPrompt(topic, bullet);
-    send(controller, {
-      type: "subagent.start",
-      id: runId,
-      name: handle.name,
-      data: { bullet },
-      ts: Date.now(),
-    });
-    try {
-      const events = handle.agent.streamEvents(
-        { messages: [{ role: "user", content: prompt }] },
-        { version: "v2", recursionLimit: 40 }
-      );
-      let lastText = "";
-      for await (const ev of events) {
-        if (ev.event === "on_chat_model_stream") {
-          const text = extractText(ev.data?.chunk);
-          if (text) {
-            lastText += text;
-            send(controller, {
-              type: "model.token",
-              id: runId,
-              parent: handle.name,
-              data: { text },
-              ts: Date.now(),
-            });
-          }
-        } else if (ev.event === "on_chat_model_end") {
-          const finalText = extractText(ev.data?.output);
-          if (finalText) lastText = finalText;
-        } else if (ev.event === "on_tool_start") {
-          send(controller, {
-            // Use LangChain's stable per-run id so tool.start and tool.end
-            // share the same id (Date.now() drifted between the two before,
-            // so tool.end never matched and the spinner never stopped).
-            type: "tool.start",
-            id: String(ev.run_id ?? `${runId}-${String(ev.name ?? "tool")}`),
-            name: String(ev.name ?? "tool"),
-            // Tag with the unique subagent runId (not the shared "researcher"
-            // name) so the UI can nest each tool under the right subagent.
-            parent: runId,
-            data: { args: ev.data?.input },
-            ts: Date.now(),
-          });
-        } else if (ev.event === "on_tool_end") {
-          send(controller, {
-            type: "tool.end",
-            id: String(ev.run_id ?? `${runId}-${String(ev.name ?? "tool")}`),
-            name: String(ev.name ?? "tool"),
-            parent: runId,
-            data: { output: extractToolContent(ev.data?.output) },
-            ts: Date.now(),
-          });
+  model: ChatOpenAI,
+  emit: Emit,
+  task: SubagentTask
+): Promise<SubagentRun> {
+  const { runId, prompt, bullet, bulletIndex, bulletTitle } = task;
+  emit({ type: "subagent.start", id: runId, name: handle.name, data: { bullet }, ts: Date.now() });
+  try {
+    const events = handle.agent.streamEvents(
+      { messages: [{ role: "user", content: prompt }] },
+      { version: "v2", recursionLimit: 40 }
+    );
+    let lastText = "";
+    for await (const ev of events) {
+      if (ev.event === "on_chat_model_stream") {
+        const text = extractText(ev.data?.chunk);
+        if (text) {
+          lastText += text;
+          emit({ type: "model.token", id: runId, parent: handle.name, data: { text }, ts: Date.now() });
         }
-      }
-
-      const parsed = await extractResearchOutput(
-        researcherModel,
-        lastText,
-        bullet.index,
-        bullet.title
-      );
-      if (!parsed) {
-        send(controller, {
-          type: "subagent.error",
-          id: runId,
-          data: { message: "Failed to parse researcher output" },
+      } else if (ev.event === "on_chat_model_end") {
+        const finalText = extractText(ev.data?.output);
+        if (finalText) lastText = finalText;
+      } else if (ev.event === "on_tool_start") {
+        emit({
+          type: "tool.start",
+          id: String(ev.run_id ?? `${runId}-${String(ev.name ?? "tool")}`),
+          name: String(ev.name ?? "tool"),
+          parent: runId,
+          data: { args: ev.data?.input },
           ts: Date.now(),
         });
-        return { bulletIndex: bullet.index, bulletTitle: bullet.title, output: null, error: "parse failed" };
+      } else if (ev.event === "on_tool_end") {
+        emit({
+          type: "tool.end",
+          id: String(ev.run_id ?? `${runId}-${String(ev.name ?? "tool")}`),
+          name: String(ev.name ?? "tool"),
+          parent: runId,
+          data: { output: extractToolContent(ev.data?.output) },
+          ts: Date.now(),
+        });
       }
-      send(controller, {
-        type: "subagent.end",
-        id: runId,
-        name: handle.name,
-        data: { output: parsed },
-        ts: Date.now(),
-      });
-      return { bulletIndex: bullet.index, bulletTitle: bullet.title, output: parsed };
-    } catch (err) {
-      send(controller, {
-        type: "subagent.error",
-        id: runId,
-        data: { message: errMessage(err) },
-        ts: Date.now(),
-      });
-      return { bulletIndex: bullet.index, bulletTitle: bullet.title, output: null, error: errMessage(err) };
     }
-  };
 
-  return Promise.all(bullets.map((bullet) => limit(() => runOne(bullet))));
+    const parsed = await extractResearchOutput(model, lastText, bulletIndex, bulletTitle);
+    if (!parsed) {
+      emit({ type: "subagent.error", id: runId, data: { message: "Failed to parse researcher output" }, ts: Date.now() });
+      return { bulletIndex, bulletTitle, output: null, error: "parse failed" };
+    }
+    // The orchestrator owns bullet identity, so the merge stays correct even if
+    // the model echoed a different index/title.
+    const output: ResearchAgentOutput = { ...parsed, bulletIndex, bulletTitle };
+    emit({ type: "subagent.end", id: runId, name: handle.name, data: { output }, ts: Date.now() });
+    return { bulletIndex, bulletTitle, output };
+  } catch (err) {
+    emit({ type: "subagent.error", id: runId, data: { message: errMessage(err) }, ts: Date.now() });
+    return { bulletIndex, bulletTitle, output: null, error: errMessage(err) };
+  }
+}
+
+// Merge a follow-up output into the result for its bullet: union findings
+// (dedup by source+title), take the max confidence, and extend the summary.
+function mergeOutput(
+  resultsMap: Map<number, ResearchAgentOutput>,
+  output: ResearchAgentOutput
+): void {
+  const existing = resultsMap.get(output.bulletIndex);
+  if (!existing) {
+    resultsMap.set(output.bulletIndex, output);
+    return;
+  }
+  const seen = new Set(existing.findings.map((f) => `${f.sourceUrl}::${f.title}`));
+  for (const f of output.findings) {
+    const key = `${f.sourceUrl}::${f.title}`;
+    if (!seen.has(key)) {
+      existing.findings.push(f);
+      seen.add(key);
+    }
+  }
+  existing.confidenceScore = Math.max(existing.confidenceScore, output.confidenceScore);
+  if (output.summary && !existing.summary.includes(output.summary)) {
+    existing.summary = `${existing.summary} ${output.summary}`.trim();
+  }
+}
+
+function shortTitle(directive: string): string {
+  const trimmed = directive.trim().replace(/\s+/g, " ");
+  return trimmed.length <= 60 ? trimmed : `${trimmed.slice(0, 57)}...`;
 }
 
 function sseResponse(stream: ReadableStream) {

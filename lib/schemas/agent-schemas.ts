@@ -11,7 +11,7 @@ export const mainAgentPlanSchema = z.object({
   bulletPoints: z
     .array(bulletPointSchema)
     .min(3)
-    .max(6),
+    .max(8),
   summary: z.string(),
 });
 
@@ -30,6 +30,19 @@ export const researchAgentOutputSchema = z.object({
   confidenceScore: z.number().min(0).max(1),
 });
 
+// Reflection stage output: gaps the orchestrator should close in a follow-up wave.
+export const reflectionGapSchema = z.object({
+  bulletIndex: z.number().int().min(0).finite(), // index of the related bullet, or 0 for a new sub-question
+  directive: z.string(),
+  reason: z.enum(["low_confidence", "coverage_gap", "contradiction"]),
+});
+
+export const reflectionSchema = z.object({
+  sufficient: z.boolean(),
+  gaps: z.array(reflectionGapSchema),
+  notes: z.string(),
+});
+
 export const synthesizedReportSchema = z.object({
   title: z.string(),
   executiveSummary: z.string(),
@@ -46,4 +59,6 @@ export const synthesizedReportSchema = z.object({
 export type BulletPoint = z.infer<typeof bulletPointSchema>;
 export type MainAgentPlan = z.infer<typeof mainAgentPlanSchema>;
 export type ResearchAgentOutput = z.infer<typeof researchAgentOutputSchema>;
+export type ReflectionGap = z.infer<typeof reflectionGapSchema>;
+export type Reflection = z.infer<typeof reflectionSchema>;
 export type SynthesizedReport = z.infer<typeof synthesizedReportSchema>;
