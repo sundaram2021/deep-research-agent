@@ -32,7 +32,7 @@ export const researchAgentOutputSchema = z.object({
 
 // Reflection stage output: gaps the orchestrator should close in a follow-up wave.
 export const reflectionGapSchema = z.object({
-  bulletIndex: z.number(), // index of the related bullet, or 0 for a new sub-question
+  bulletIndex: z.number().int().min(0).finite(), // index of the related bullet, or 0 for a new sub-question
   directive: z.string(),
   reason: z.enum(["low_confidence", "coverage_gap", "contradiction"]),
 });
