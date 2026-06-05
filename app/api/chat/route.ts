@@ -129,7 +129,7 @@ function streamResearchPhase(
         await withSourcePool(pool, async () => {
           emit({ type: "research.start", ts: Date.now() });
 
-          const { main, researcher } = getModelPair();
+          const { main, researcher, extractor } = getModelPair();
           const handle = createResearcherAgent(researcher);
           const concurrency = Math.max(1, Number(process.env.RESEARCH_CONCURRENCY) || DEFAULT_CONCURRENCY);
           const maxWaves = Math.max(1, Number(process.env.RESEARCH_MAX_WAVES) || DEFAULT_MAX_WAVES);
@@ -144,7 +144,7 @@ function streamResearchPhase(
             bulletIndex: bullet.index,
             bulletTitle: bullet.title,
           }));
-          const wave1 = await runWave(handle, researcher, emit, limit, wave1Tasks);
+          const wave1 = await runWave(handle, extractor, emit, limit, wave1Tasks);
 
           const resultsMap = new Map<number, ResearchAgentOutput>();
           for (const run of wave1) if (run.output) resultsMap.set(run.output.bulletIndex, run.output);
@@ -187,7 +187,7 @@ function streamResearchPhase(
                 bulletTitle: title,
               };
             });
-            const followRuns = await runWave(handle, researcher, emit, limit, followTasks);
+            const followRuns = await runWave(handle, extractor, emit, limit, followTasks);
             for (const run of followRuns) if (run.output) mergeOutput(resultsMap, run.output);
           }
 
@@ -227,17 +227,17 @@ function streamResearchPhase(
 
 async function runWave(
   handle: ReturnType<typeof createResearcherAgent>,
-  model: ChatOpenAI,
+  repairModel: ChatOpenAI,
   emit: Emit,
   limit: <T>(fn: () => Promise<T>) => Promise<T>,
   tasks: SubagentTask[]
 ): Promise<SubagentRun[]> {
-  return Promise.all(tasks.map((task) => limit(() => runSubagent(handle, model, emit, task))));
+  return Promise.all(tasks.map((task) => limit(() => runSubagent(handle, repairModel, emit, task))));
 }
 
 async function runSubagent(
   handle: ReturnType<typeof createResearcherAgent>,
-  model: ChatOpenAI,
+  repairModel: ChatOpenAI,
   emit: Emit,
   task: SubagentTask
 ): Promise<SubagentRun> {
@@ -280,7 +280,7 @@ async function runSubagent(
       }
     }
 
-    const parsed = await extractResearchOutput(model, lastText, bulletIndex, bulletTitle);
+    const parsed = await extractResearchOutput(repairModel, lastText, bulletIndex, bulletTitle);
     if (!parsed) {
       emit({ type: "subagent.error", id: runId, data: { message: "Failed to parse researcher output" }, ts: Date.now() });
       return { bulletIndex, bulletTitle, output: null, error: "parse failed" };

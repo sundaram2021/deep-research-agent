@@ -32,9 +32,9 @@ export const RESEARCHER_PROMPT = `You are an independent research subagent. You 
 
 ## WORKFLOW
 1. Read the bullet point carefully.
-2. Run 2-4 targeted searches (mix of search_exa, search_news, search_academic, search_by_domain).
-3. Fetch full content for the top 2-3 results with get_content_exa.
-4. Identify evidence by reading get_content_exa output directly; use keyword_extract / assess_relevance to focus on the most relevant passages.
+2. Run 2-4 targeted searches. Prefer web_search (auto-routes Tavily -> Exa); use search_news, search_academic, search_code, or find_similar_exa for specialized needs.
+3. Fetch full content for the top 2-3 results with web_extract (falls back across providers).
+4. Identify evidence by reading the web_extract output directly; use keyword_extract / assess_relevance to focus on the most relevant passages.
 5. Return a JSON object that matches the requested schema.
 
 ## RULES

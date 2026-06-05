@@ -4,6 +4,7 @@ import Exa from "exa-js";
 import { withRetry } from "../utils/network-helpers";
 import { SearchError } from "../utils/typed-errors";
 import { currentSourcePool } from "../agents/source-pool";
+import { getSearchRouter } from "../search/router";
 
 const exa = () => new Exa(process.env.EXA_API_KEY || "mock-key");
 
@@ -185,7 +186,58 @@ export const fetch_rss = tool(async ({ url }) => {
   }
 }, { name: "fetch_rss", description: "Fetch and parse an RSS or Atom feed into {title, link, pubDate} items.", schema: z.object({ url: z.string() }) });
 
+// Provider-routed primary tools: prefer these. They route Tavily -> Exa with
+// automatic fallback and share the per-request source pool for dedup.
+export const web_search = tool(async ({ query, limit = 5, topic = "general" }) => {
+  const router = getSearchRouter();
+  if (!router.hasConfiguredProvider()) {
+    return `[MOCK web_search for "${query}"]: no provider configured (set TAVILY_API_KEY or EXA_API_KEY).`;
+  }
+  const key = `web:${topic}:${limit}:${query}`;
+  const pool = currentSourcePool();
+  const cached = pool?.getSearch(key);
+  if (cached !== undefined) return cached;
+  try {
+    const { provider, results } = await router.search(query, { limit, topic });
+    if (results.length === 0) return `No results for "${query}".`;
+    const out = JSON.stringify({ provider, results });
+    pool?.setSearch(key, out);
+    return out;
+  } catch (err) {
+    return `Error: web_search failed (${err instanceof Error ? err.message : String(err)})`;
+  }
+}, { name: "web_search", description: "Primary web search. Auto-routes to the best configured provider (Tavily, then Exa) with fallback. Returns {provider, results:[{title,url,content,score}]}.", schema: z.object({ query: z.string(), limit: z.number().default(5), topic: z.enum(["general", "news"]).default("general") }) });
+
+export const web_extract = tool(async ({ urls }) => {
+  const router = getSearchRouter();
+  if (!router.hasConfiguredProvider()) {
+    return urls.map((u) => `[MOCK web_extract for ${u}]: no provider configured.`).join("\n");
+  }
+  const pool = currentSourcePool();
+  const out: { url: string; content: string }[] = [];
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  for (const url of urls) {
+    const hit = pool?.getContent(`web:${url}`);
+    if (hit !== undefined) out.push({ url, content: hit });
+    else if (!seen.has(url)) { missing.push(url); seen.add(url); }
+  }
+  if (missing.length > 0) {
+    try {
+      const { results } = await router.extract(missing);
+      for (const r of results) {
+        if (r.url) pool?.setContent(`web:${r.url}`, r.content);
+        out.push(r);
+      }
+    } catch (err) {
+      return `Error: web_extract failed for ${missing.length} url(s) (${err instanceof Error ? err.message : String(err)})`;
+    }
+  }
+  return JSON.stringify(out);
+}, { name: "web_extract", description: "Fetch clean page content for URLs via the best provider (Tavily extract, then Exa), deduplicated per research run.", schema: z.object({ urls: z.array(z.string()) }) });
+
 export const searchTools = [
+  web_search, web_extract,
   search_exa, get_content_exa, find_similar_exa, search_news, search_code,
   search_academic, search_by_domain, search_by_date, validate_url,
   extract_links, fetch_rss,
