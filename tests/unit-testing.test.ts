@@ -88,7 +88,7 @@ function validateOpenAISchema(label: string, schema: z.ZodTypeAny, path = ""): s
     if (!required.has(key)) broken.push(`${label}${subPath}: missing required=[${key}]`);
     if (!hasType(sub)) broken.push(`${label}${subPath}: missing 'type' (OpenAI strict mode rejects z.any()/z.unknown())`);
     if (sub && typeof sub === "object" && "_def" in sub) {
-      broken.push(...validateOpenAISchema(label, sub as z.ZodTypeAny, subPath));
+      broken.push(...validateOpenAISchema(label, sub as unknown as z.ZodTypeAny, subPath));
     }
   }
   if (json.items && typeof json.items === "object" && "_def" in (json.items as object)) {

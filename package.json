@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx tests/unit-testing.test.ts && tsx tests/integration-testing.test.ts",
-    "eval": "tsx scripts/run-evaluation.ts"
+    "eval": "tsx scripts/run-evaluation.ts",
+    "worker": "node --env-file=.env.local --import tsx worker/index.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.1.48",
