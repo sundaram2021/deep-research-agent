@@ -54,6 +54,50 @@ export async function setError(jobId: string, error: string): Promise<void> {
     .where(eq(schema.researchJobs.id, jobId));
 }
 
+export interface PersistedEvent extends AgentEvent {
+  seq: number;
+}
+
+// Subset of the Drizzle select row needed to reconstruct an event.
+interface EventRowLike {
+  type: string;
+  eventId: string | null;
+  name: string | null;
+  parent: string | null;
+  data: unknown;
+  ts: number;
+  seq: number;
+}
+
+// Map an event to its persisted row, preserving the full envelope (id/name/parent)
+// so replay is lossless and matches the live publish shape.
+export function eventToRow(jobId: string, seq: number, event: AgentEvent) {
+  return {
+    jobId,
+    seq,
+    type: event.type,
+    eventId: event.id ?? null,
+    name: event.name ?? null,
+    parent: event.parent ?? null,
+    data: event.data ?? null,
+    ts: event.ts ?? Date.now(),
+  };
+}
+
+// Reconstruct an event from a persisted row. Absent envelope fields come back as
+// undefined, exactly like the live publish ({ ...event, seq }).
+export function rowToEvent(row: EventRowLike): PersistedEvent {
+  return {
+    type: row.type,
+    id: row.eventId ?? undefined,
+    name: row.name ?? undefined,
+    parent: row.parent ?? undefined,
+    data: row.data,
+    ts: Number(row.ts),
+    seq: row.seq,
+  };
+}
+
 // Per-job monotonic sequence. A job is processed by exactly one worker run, and
 // the read+write below is synchronous (no await between), so concurrent emits
 // from parallel subagents still receive distinct, ordered seqs.
@@ -62,13 +106,7 @@ const seqByJob = new Map<string, number>();
 export async function appendEvent(jobId: string, event: AgentEvent): Promise<void> {
   const seq = (seqByJob.get(jobId) ?? 0) + 1;
   seqByJob.set(jobId, seq);
-  await getDb().insert(schema.jobEvents).values({
-    jobId,
-    seq,
-    type: event.type,
-    data: event.data ?? null,
-    ts: event.ts ?? Date.now(),
-  });
+  await getDb().insert(schema.jobEvents).values(eventToRow(jobId, seq, event));
   await publisher().publish(jobChannel(jobId), JSON.stringify({ ...event, seq }));
 }
 

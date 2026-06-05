@@ -19,6 +19,12 @@ export const jobEvents = pgTable("job_events", {
   jobId: text("job_id").notNull(),
   seq: integer("seq").notNull(),
   type: text("type").notNull(),
+  // Event envelope fields. These MUST be persisted (not just published live) so
+  // replayed tool.*/subagent.*/model.token events keep their identity/scope and
+  // the client can pair starts/ends and nest correctly on reconnect.
+  eventId: text("event_id"),
+  name: text("name"),
+  parent: text("parent"),
   data: jsonb("data"),
   ts: bigint("ts", { mode: "number" }).notNull(),
 });

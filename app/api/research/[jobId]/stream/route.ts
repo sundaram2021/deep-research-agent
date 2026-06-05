@@ -7,7 +7,7 @@
 // seq it saw and lose nothing.
 
 import { NextRequest } from "next/server";
-import { getEvents, getJob, jobChannel } from "../../../../../lib/jobs/job-store";
+import { getEvents, getJob, jobChannel, rowToEvent } from "../../../../../lib/jobs/job-store";
 import { createRedisClient } from "../../../../../lib/queue/connection";
 import { isDbConfigured } from "../../../../../lib/db/client";
 
@@ -72,10 +72,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ jobId: stri
       });
       await sub.subscribe(jobChannel(jobId));
 
-      // 2) Replay everything persisted past `after`.
+      // 2) Replay everything persisted past `after`. rowToEvent restores the full
+      // envelope (id/name/parent) so reconnecting clients can pair tool/subagent
+      // starts and ends and keep parent scoping — identical to the live publish.
       const past = await getEvents(jobId, after);
       for (const row of past) {
-        handle({ type: row.type, data: row.data, ts: Number(row.ts), seq: row.seq } as { seq?: number; type?: string });
+        handle(rowToEvent(row));
         if (closed) return;
       }
 
