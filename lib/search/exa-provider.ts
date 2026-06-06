@@ -3,6 +3,7 @@
 
 import Exa from "exa-js";
 import { withRetry } from "../utils/network-helpers";
+import { exaLimiter } from "../utils/rate-limiters";
 import type { ExtractResult, SearchOptions, SearchProvider, SearchResult } from "./types";
 
 type ExaResultRow = {
@@ -36,7 +37,7 @@ export class ExaProvider implements SearchProvider {
       if (options.topic === "news") opts.category = "news";
       if (options.includeDomains?.length) opts.includeDomains = options.includeDomains;
       if (options.startDate) opts.startPublishedDate = options.startDate;
-      const res = await this.client().search(query, opts);
+      const res = await exaLimiter().schedule(() => this.client().search(query, opts));
       const rows = (res.results ?? []) as unknown as ExaResultRow[];
       return rows.map((r) => ({
         title: r.title ?? "",
@@ -51,7 +52,7 @@ export class ExaProvider implements SearchProvider {
   async extract(urls: string[]): Promise<ExtractResult[]> {
     if (urls.length === 0) return [];
     return withRetry(async () => {
-      const res = await this.client().getContents(urls);
+      const res = await exaLimiter().schedule(() => this.client().getContents(urls));
       const rows = (res.results ?? []) as unknown as ExaResultRow[];
       return rows.map((r) => ({ url: r.url ?? "", content: r.text ?? "" }));
     });
