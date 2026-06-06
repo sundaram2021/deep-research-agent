@@ -4,7 +4,7 @@ import { testToolRegistry, testToolSchemasStrict, testOrchestrationTool } from "
 import { testSchemasValid, testSchemasRejectInvalid, testReflectionSchema } from "./unit/schema-tests";
 import { testModelPairCaches, testSourcePoolDedup, testJobEventRoundTrip, testVectorMath } from "./unit/core-tests";
 import { testSearchRouterFallback, testRateLimiterSpacing } from "./unit/async-tests";
-import { testA2APayloadRoundTrip, testA2ABadMessageRejected, testAnalyzerCardStreaming } from "./unit/a2a-tests";
+import { testCollectorOutputSchema, testBuildAnalyzerMessages } from "./unit/synthesis-tests";
 
 async function runAllTests() {
   console.log("=== RUNNING UNIT TESTS ===");
@@ -21,9 +21,8 @@ async function runAllTests() {
     testVectorMath();
     testOrchestrationTool();
     await testRateLimiterSpacing();
-    testA2APayloadRoundTrip();
-    testA2ABadMessageRejected();
-    testAnalyzerCardStreaming();
+    testCollectorOutputSchema();
+    testBuildAnalyzerMessages();
     console.log("=== ALL UNIT TESTS PASSED ===");
   } catch (err) {
     console.error("Unit Tests Failed:", err);

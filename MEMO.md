@@ -37,6 +37,11 @@ Postgres (Drizzle) + Redis + BullMQ for durable jobs, Tavily→Exa search routin
 - **Composable tools:** one tool consumes another's structured output — proven by
   an integration test (`csv_to_json → calculate_stats`) and by the
   search→extract→verify/summarize and researcher→synthesis data flows.
+- **Native Collector-Analyzer synthesis:** The final report synthesis is delegated
+  to a native, schema-controlled collaboration between a Collector Agent (which
+  structures and validates findings via `collectorOutputSchema` using LLM structured output)
+  and an Analyzer Agent (which streams the cited markdown report using system prompts),
+  providing full process control, lighter-model usage, and a fail-safe direct synthesis fallback.
 
 ## What I cut (and why)
 

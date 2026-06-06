@@ -16,8 +16,12 @@ import {
   buildFollowupPrompt,
   createResearcherAgent,
 } from "../agents/researcher-agent";
-import { streamSynthesis, type ReportFormat, type SynthesisInput } from "../agents/synthesis";
-import { streamSynthesisViaA2A } from "../a2a/collector";
+import {
+  streamSynthesis,
+  streamSynthesisViaCollectorAnalyzer,
+  type ReportFormat,
+  type SynthesisInput,
+} from "../agents/synthesis";
 import { reflectOnResults } from "../agents/reflection";
 import { getCheckpointer } from "../agents/checkpointer";
 import { SourcePool, withSourcePool } from "../agents/source-pool";
@@ -45,7 +49,7 @@ export async function runResearchPipeline({ topic, bullets, emit, checkCancelled
     emit({ type: "research.start", ts: Date.now() });
     logger.info("pipeline.start", { topic, bullets: bullets.length });
 
-    const { main, researcher, extractor } = getModelPair();
+    const { main, researcher, extractor, collector, analyzer } = getModelPair();
     const checkpointer = await getCheckpointer();
     const handle = createResearcherAgent(researcher, checkpointer ?? undefined);
     const concurrency = Math.max(1, Number(process.env.RESEARCH_CONCURRENCY) || DEFAULT_CONCURRENCY);
@@ -143,17 +147,23 @@ export async function runResearchPipeline({ topic, bullets, emit, checkCancelled
 
     if (useA2A) {
       try {
-        emit({ type: "a2a.collector.start", ts: Date.now() });
-        for await (const token of streamSynthesisViaA2A(synthesisInput, format)) {
+        emit({ type: "synthesis.collector.start", ts: Date.now() });
+        for await (const token of streamSynthesisViaCollectorAnalyzer(
+          collector,
+          analyzer,
+          synthesisInput,
+          format,
+          aborted.signal
+        )) {
           assembled += token;
           emit({ type: "synthesis.token", data: { text: token }, ts: Date.now() });
         }
-        emit({ type: "a2a.collector.end", data: { chars: assembled.length }, ts: Date.now() });
+        emit({ type: "synthesis.collector.end", data: { chars: assembled.length }, ts: Date.now() });
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        logger.warn("pipeline.a2a.fallback", { reason });
-        // Reset any partial A2A output in the UI, then synthesize directly.
-        emit({ type: "a2a.fallback", data: { reason }, ts: Date.now() });
+        logger.warn("pipeline.collector-analyzer.fallback", { reason });
+        // Reset any partial output in the UI, then synthesize directly.
+        emit({ type: "synthesis.fallback", data: { reason }, ts: Date.now() });
         emit({ type: "synthesis.start", ts: Date.now() });
         await streamDirect();
       }
