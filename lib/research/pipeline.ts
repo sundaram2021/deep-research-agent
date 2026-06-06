@@ -16,6 +16,7 @@ import { reflectOnResults } from "../agents/reflection";
 import { getCheckpointer } from "../agents/checkpointer";
 import { SourcePool, withSourcePool } from "../agents/source-pool";
 import { pLimit } from "../utils/network-helpers";
+import { logger } from "../utils/observability-logger";
 import { TokenBudget } from "./budget";
 import { CancelledError } from "../utils/typed-errors";
 import type { BulletPoint, ResearchAgentOutput } from "../schemas/agent-schemas";
@@ -64,8 +65,10 @@ export interface PipelineInput {
 // run.error so HTTP and worker lifecycles can differ. Returns the final report.
 export async function runResearchPipeline({ topic, bullets, emit, checkCancelled, reportFormat }: PipelineInput): Promise<string> {
   const pool = new SourcePool();
+  const startedAt = Date.now();
   return withSourcePool(pool, async () => {
     emit({ type: "research.start", ts: Date.now() });
+    logger.info("pipeline.start", { topic, bullets: bullets.length });
 
     const { main, researcher, extractor } = getModelPair();
     const checkpointer = await getCheckpointer();
@@ -94,8 +97,10 @@ export async function runResearchPipeline({ topic, bullets, emit, checkCancelled
     const resultsMap = new Map<number, ResearchAgentOutput>();
     for (const run of wave1) if (run.output) resultsMap.set(run.output.bulletIndex, run.output);
     const failedWave1 = wave1.filter((r) => !r.output).length;
+    logger.info("pipeline.wave.complete", { wave: 1, ok: resultsMap.size, failed: failedWave1 });
 
     if (resultsMap.size === 0) {
+      logger.error("pipeline.failed", { reason: "all subagents failed", topic });
       throw new Error("All subagent research failed; cannot synthesize");
     }
 
@@ -106,6 +111,7 @@ export async function runResearchPipeline({ topic, bullets, emit, checkCancelled
       await ensureNotCancelled();
       if (budget.exceeded()) {
         emit({ type: "budget.exceeded", data: { used: budget.total, limit: budget.max }, ts: Date.now() });
+        logger.warn("pipeline.budget.exceeded", { used: budget.total, limit: budget.max });
         break;
       }
       emit({ type: "reflection.start", data: { wave }, ts: Date.now() });
@@ -160,6 +166,7 @@ export async function runResearchPipeline({ topic, bullets, emit, checkCancelled
     emit({ type: "final.content", data: { text: assembled }, ts: Date.now() });
     emit({ type: "synthesis.end", ts: Date.now() });
     emit({ type: "research.complete", data: { sourcePool: pool.stats(), waves: wave }, ts: Date.now() });
+    logger.info("pipeline.complete", { topic, waves: wave, durationMs: Date.now() - startedAt, ...pool.stats() });
     return assembled;
   });
 }
