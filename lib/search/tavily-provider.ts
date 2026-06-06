@@ -3,6 +3,7 @@
 // as an api_key body field to support either Tavily auth style.
 
 import { withRetry } from "../utils/network-helpers";
+import { tavilyLimiter } from "../utils/rate-limiters";
 import { RateLimitError, SearchError } from "../utils/typed-errors";
 import type { ExtractResult, SearchOptions, SearchProvider, SearchResult } from "./types";
 
@@ -65,14 +66,16 @@ export class TavilyProvider implements SearchProvider {
 
   private async post<T>(url: string, label: string, body: Record<string, unknown>): Promise<T> {
     return withRetry(async () => {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify({ api_key: this.apiKey, ...body }),
-      });
+      const res = await tavilyLimiter().schedule(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify({ api_key: this.apiKey, ...body }),
+        })
+      );
       if (res.status === 429) throw new RateLimitError(`${label} rate limited`);
       if (!res.ok) throw new SearchError(`${label} failed: HTTP ${res.status}`);
       return (await res.json()) as T;
