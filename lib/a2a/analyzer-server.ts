@@ -21,14 +21,14 @@ import type {
   TaskArtifactUpdateEvent,
   TaskStatusUpdateEvent,
 } from "@a2a-js/sdk";
-
-// The subset of A2A task states the Analyzer emits (all valid TaskStatus states).
-type AnalyzerTaskState = "submitted" | "working" | "completed" | "failed" | "canceled";
 import { getModelPair } from "../models";
 import { streamSynthesis, type ReportFormat, type SynthesisInput } from "../agents/synthesis";
 import { buildAnalyzerCard } from "./analyzer-card";
 import { decodeSynthesisRequest, REPORT_ARTIFACT_NAME } from "./types";
 import { logger, withSpan } from "../utils/observability-logger";
+
+// The subset of A2A task states the Analyzer emits (all valid TaskStatus states).
+type AnalyzerTaskState = "submitted" | "working" | "completed" | "failed" | "canceled";
 
 const HOST = "127.0.0.1";
 
