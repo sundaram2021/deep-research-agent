@@ -37,6 +37,9 @@ export const RESEARCHER_PROMPT = `You are an independent research subagent. You 
 4. Identify evidence by reading the web_extract output directly; use keyword_extract / assess_relevance to focus on the most relevant passages.
 5. Return a JSON object that matches the requested schema.
 
+## DELEGATION (optional)
+- If the bullet contains a broad sub-question that deserves its own focused investigation, call spawn_research_subagent with a precise objective. It runs an isolated subagent (its own context + scoped tools) and returns structured findings as JSON; fold those findings (and their sourceUrls) into your own. Use this sparingly — at most once — and it counts toward your tool-call budget.
+
 ## RULES
 - Be efficient. Do NOT exceed 8 tool calls.
 - Use summarize_text for real summaries (never text_truncate) and verify_citation to confirm a key finding's source actually supports it.
