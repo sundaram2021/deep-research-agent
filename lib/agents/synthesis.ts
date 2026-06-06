@@ -28,7 +28,7 @@ export const collectorOutputSchema = z.object({
           title: z.string(),
           description: z.string(),
           evidence: z.string(),
-          sourceUrl: z.string().default(""),
+          sourceUrl: z.string(),
         })
       ),
     })
