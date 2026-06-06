@@ -3,8 +3,10 @@ import { textTools } from "../lib/tools/text-tools";
 import { dataTools } from "../lib/tools/data-tools";
 import { agentTools } from "../lib/tools/agent-tools";
 import { knowledgeTools } from "../lib/tools/knowledge-tools";
+import { orchestrationTools } from "../lib/tools/orchestration-tools";
 import { cosineSimilarity } from "../lib/agents/embeddings";
 import { findDuplicateIndices } from "../lib/research/vector-store";
+import { RateLimiter } from "../lib/utils/network-helpers";
 import {
   mainAgentPlanSchema,
   researchAgentOutputSchema,
@@ -20,11 +22,13 @@ import assert from "node:assert";
 
 function testToolRegistry() {
   const totalTools =
-    searchTools.length + textTools.length + dataTools.length + agentTools.length + knowledgeTools.length;
-  // Phase 0 removed mock/noise tools (get_domain_rank, list_search_engines) and
-  // replaced others with real implementations. We favor real, honest tools over a
-  // padded count, so the floor is 40 rather than the original 50.
-  assert.ok(totalTools >= 40, `Expected at least 40 tools, got ${totalTools}`);
+    searchTools.length + textTools.length + dataTools.length + agentTools.length +
+    knowledgeTools.length + orchestrationTools.length;
+  // We favor real, honest tools over a padded count. The registry now spans 6
+  // namespaces (search, text, data, agent, knowledge, orchestration) and clears
+  // the brief's "50+ tools across 4+ namespaces" bar; the floor stays at 50 as a
+  // regression guard.
+  assert.ok(totalTools >= 50, `Expected at least 50 tools, got ${totalTools}`);
   console.log(`[PASS] testToolRegistry (${totalTools} tools)`);
 }
 
@@ -67,7 +71,7 @@ function testSchemasRejectInvalid() {
 }
 
 function testToolSchemasStrict() {
-  const allTools = [...searchTools, ...textTools, ...dataTools, ...agentTools, ...knowledgeTools];
+  const allTools = [...searchTools, ...textTools, ...dataTools, ...agentTools, ...knowledgeTools, ...orchestrationTools];
   const broken: string[] = [];
 
   for (const t of allTools) {
@@ -222,6 +226,41 @@ function testVectorMath() {
   console.log("[PASS] testVectorMath");
 }
 
+function testOrchestrationTool() {
+  // The model-callable subagent-spawning tool must be registered and expose an
+  // OpenAI-safe schema (all fields required, no z.any()).
+  const names = orchestrationTools.map((t) => (t as { name: string }).name);
+  assert.ok(names.includes("spawn_research_subagent"), "spawn_research_subagent should be registered");
+  const spawn = orchestrationTools.find((t) => (t as { name: string }).name === "spawn_research_subagent") as {
+    schema: z.ZodTypeAny;
+  };
+  const json = z.toJSONSchema(spawn.schema) as { properties?: Record<string, unknown>; required?: string[] };
+  assert.deepStrictEqual(
+    new Set(json.required ?? []),
+    new Set(["objective", "context"]),
+    "spawn tool must require objective + context (OpenAI strict mode)"
+  );
+  console.log("[PASS] testOrchestrationTool");
+}
+
+async function testRateLimiterSpacing() {
+  // The RateLimiter must serialize calls with a minimum interval between them.
+  const minInterval = 40;
+  const limiter = new RateLimiter(minInterval);
+  const times: number[] = [];
+  await Promise.all(
+    [0, 1, 2].map(() =>
+      limiter.schedule(async () => {
+        times.push(Date.now());
+      })
+    )
+  );
+  times.sort((a, b) => a - b);
+  assert.ok(times[1] - times[0] >= minInterval - 10, "2nd call spaced ~>= interval");
+  assert.ok(times[2] - times[1] >= minInterval - 10, "3rd call spaced ~>= interval");
+  console.log("[PASS] testRateLimiterSpacing");
+}
+
 async function runAllTests() {
   console.log("=== RUNNING UNIT TESTS ===");
   try {
@@ -235,6 +274,8 @@ async function runAllTests() {
     await testSearchRouterFallback();
     testJobEventRoundTrip();
     testVectorMath();
+    testOrchestrationTool();
+    await testRateLimiterSpacing();
     console.log("=== ALL UNIT TESTS PASSED ===");
   } catch (err) {
     console.error("Unit Tests Failed:", err);
