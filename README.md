@@ -6,6 +6,8 @@ follow-up waves, then synthesizes a cited markdown report. Runs interactively in
 the browser, or as durable background jobs that survive disconnects.
 
 Built with Next.js 16, TypeScript, `deepagents`/LangChain, and OpenAI models.
+<img width="1830" height="803" alt="image" src="https://github.com/user-attachments/assets/cbb67a6f-97ab-4137-b319-b4293ef42383" />
+**Demo Link** : https://drive.google.com/file/d/1jFhVbokS2BwKkmKBHM7dsyGNSoMG5-S4/view?usp=sharing
 
 ---
 
