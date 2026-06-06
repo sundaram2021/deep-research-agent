@@ -69,6 +69,8 @@ See `.env.example`. Highlights:
 | `OPENAI_MODEL` / `RESEARCHER_MODEL` / `EXTRACTOR_MODEL` | model tiers |
 | `RESEARCH_CONCURRENCY` / `RESEARCH_MAX_WAVES` / `RESEARCH_MAX_FOLLOWUPS` | engine tuning |
 | `RESEARCH_TOKEN_BUDGET` | stop follow-up waves past N tokens (0 = unlimited) |
+| `SEARCH_MIN_INTERVAL_MS` | proactive rate limit: min ms between provider calls (default 250) |
+| `LOG_LEVEL` / `LOG_PRETTY` | structured logger level (`debug`/`info`/`warn`/`error`) and pretty output |
 | `DATABASE_URL` / `REDIS_URL` | durable jobs |
 | `CACHE_TTL_SECONDS` | Redis L2 cache TTL |
 
@@ -103,14 +105,35 @@ app/api/research        durable job endpoints (submit / status / stream / cancel
 lib/agents              planning, researcher, reflection, synthesis, embeddings, checkpointer
 lib/research            pipeline (the iterative engine), vector store, token budget
 lib/search              provider abstraction (Tavily, Exa) + router
-lib/tools               search / text / data / agent / knowledge tool namespaces
+lib/tools               search / text / data / agent / knowledge / orchestration tool namespaces
+lib/utils               retries+backoff, rate limiters, typed errors, structured logger
 lib/db, lib/queue       Drizzle (Postgres) + ioredis/BullMQ
 lib/jobs                durable job store + event log
 worker                  BullMQ worker process
+.github/workflows       CI: type-check + lint + tests on every push/PR
 ```
+
+## Subagent orchestration
+
+Subagents run in real, isolated contexts (own message history, scoped tools,
+structured return) two ways: (1) the pipeline fans out one researcher per planned
+bullet; (2) the model can call the `spawn_research_subagent` tool to delegate a
+self-contained sub-question to an isolated subagent and compose its structured
+findings — bounded at depth 1 (a spawned subagent's scoped tool set excludes the
+orchestration namespace). See `lib/agents/subagent-runner.ts`.
+
+## Reliability & observability
+
+External provider calls are wrapped with retries (exponential backoff + jitter)
+**and** a proactive per-provider rate limiter (`lib/utils/rate-limiters.ts`).
+A dependency-free structured logger (`lib/utils/observability-logger.ts`) emits
+JSON-line ops logs (retries, pipeline phases, subagent spawns, worker lifecycle)
+alongside the durable, replayable per-job event log.
 
 ## Testing
 
 `pnpm test` runs unit + integration tests (tool registry, schemas, source-pool dedup,
-reflection schema, search-router fallback, vector math, durable event round-trip).
-CI should additionally run `pnpm exec tsc --noEmit` and `pnpm lint`.
+reflection schema, search-router fallback, vector math, durable event round-trip,
+orchestration-tool registration, rate-limiter spacing, and a `csv_to_json → calculate_stats`
+composition chain). CI (`.github/workflows/ci.yml`) runs `pnpm install`, `pnpm exec tsc --noEmit`,
+`pnpm lint`, and `pnpm test` on every push and pull request.
