@@ -2,6 +2,7 @@
 // backoff + jitter, bounded concurrency (pLimit), and a spacing rate limiter.
 
 import { RateLimitError } from "./typed-errors";
+import { logger } from "./observability-logger";
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,11 +50,19 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
       if (attempt === retries || !shouldRetry(error)) break;
-      onRetry?.(error, attempt + 1);
       const backoff = Math.min(maxDelayMs, baseDelayMs * factor ** attempt);
       const delay = jitter ? backoff * (0.5 + Math.random() / 2) : backoff;
       const retryAfter =
         error instanceof RateLimitError ? error.retryAfterMs : undefined;
+      // Observability: every retry is logged with attempt count + backoff, so
+      // transient-failure patterns are visible without each caller wiring onRetry.
+      logger.warn("retry.attempt", {
+        attempt: attempt + 1,
+        maxRetries: retries,
+        delayMs: Math.round(retryAfter ?? delay),
+        error,
+      });
+      onRetry?.(error, attempt + 1);
       await sleep(retryAfter ?? delay);
     }
   }

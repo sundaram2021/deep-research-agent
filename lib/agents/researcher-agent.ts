@@ -5,6 +5,7 @@ import { textTools } from "../tools/text-tools";
 import { dataTools } from "../tools/data-tools";
 import { agentTools } from "../tools/agent-tools";
 import { knowledgeTools } from "../tools/knowledge-tools";
+import { orchestrationTools } from "../tools/orchestration-tools";
 import {
   researchAgentOutputSchema,
   type BulletPoint,
@@ -13,7 +14,11 @@ import {
 import type { ChatOpenAI } from "@langchain/openai";
 import { RESEARCHER_PROMPT } from "./prompts";
 
-const allTools = [...searchTools, ...textTools, ...dataTools, ...agentTools, ...knowledgeTools];
+// The researcher can call every tool, including `spawn_research_subagent`
+// (orchestration namespace) to delegate a sub-question to an isolated subagent.
+// The spawned subagent itself gets a scoped set WITHOUT the orchestration tools,
+// so delegation depth is bounded at 1 (see lib/agents/subagent-runner.ts).
+const allTools = [...searchTools, ...textTools, ...dataTools, ...agentTools, ...knowledgeTools, ...orchestrationTools];
 
 // Use a permissive interface for the agent so the caller can invoke without
 // pulling the entire deepagents generic-type machinery into its own types.
