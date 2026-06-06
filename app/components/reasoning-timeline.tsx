@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AssistantTurn, ReasoningEntry } from "@/app/lib/event-types";
 import { IconBrain, IconChevronDown, IconChevronRight, IconLoader, IconPulse } from "./icons";
 import ToolEvent from "./tool-event";
@@ -23,6 +23,39 @@ export default function ReasoningTimeline({ turn, running }: Props) {
   const entries = turn.entries;
   const toolCount = Object.keys(turn.toolCalls).length;
   const subCount = Object.keys(turn.subagents).length;
+
+  // Earliest timestamp across the trace — used as the start of the elapsed timer.
+  // (Entries are appended in order, but tools/subagents carry their own starts.)
+  const startTs = useMemo(() => {
+    let min = Infinity;
+    for (const e of entries) if (typeof e.ts === "number") min = Math.min(min, e.ts);
+    for (const id in turn.toolCalls) {
+      const s = turn.toolCalls[id].startedAt;
+      if (typeof s === "number") min = Math.min(min, s);
+    }
+    for (const id in turn.subagents) {
+      const s = turn.subagents[id].startedAt;
+      if (typeof s === "number") min = Math.min(min, s);
+    }
+    return Number.isFinite(min) ? min : null;
+  }, [entries, turn.toolCalls, turn.subagents]);
+
+  // Tick once a second while running so the live elapsed time advances; once the
+  // run completes we show the authoritative final duration (turn.durationMs).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  const elapsedMs =
+    turn.durationMs != null
+      ? turn.durationMs
+      : startTs != null
+        ? Math.max(0, now - startTs)
+        : null;
+  const elapsedLabel = elapsedMs != null ? `${(elapsedMs / 1000).toFixed(1)}s` : null;
 
   // Tools owned by a subagent are rendered nested under it, so skip them in the
   // top-level pass to avoid showing them twice.
@@ -52,6 +85,14 @@ export default function ReasoningTimeline({ turn, running }: Props) {
             {toolCount > 0 && `${toolCount} tool${toolCount === 1 ? "" : "s"}`}
             {subCount === 0 && toolCount === 0 && "initializing..."}
           </span>
+          {elapsedLabel && (
+            <span
+              className="shrink-0 font-mono text-zinc-400"
+              title={running ? "Elapsed research time" : "Total research time"}
+            >
+              · {elapsedLabel}
+            </span>
+          )}
         </div>
         {open ? (
           <IconChevronDown size={14} className="shrink-0 text-zinc-500" />

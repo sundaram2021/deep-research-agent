@@ -43,12 +43,13 @@ function streamPlanPhase(prompt: string) {
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (e: AgentEvent) => enqueue(controller, encoder, e);
+      const startedAt = Date.now();
       try {
         emit({ type: "run.start", ts: Date.now() });
         const { main } = getModelPair();
         const { plan, raw } = await generateResearchPlan(main, prompt);
         emit({ type: "plan.ready", data: { plan, raw }, ts: Date.now() });
-        emit({ type: "run.end", ts: Date.now() });
+        emit({ type: "run.end", data: { durationMs: Date.now() - startedAt }, ts: Date.now() });
       } catch (err) {
         emit({ type: "run.error", data: { message: errMessage(err) }, ts: Date.now() });
       } finally {
@@ -66,9 +67,10 @@ function streamResearchPhase(prompt: string, bullets: BulletPoint[], reportForma
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (e: AgentEvent) => enqueue(controller, encoder, e);
+      const startedAt = Date.now();
       try {
         await runResearchPipeline({ topic: prompt, bullets, emit, reportFormat });
-        emit({ type: "run.end", ts: Date.now() });
+        emit({ type: "run.end", data: { durationMs: Date.now() - startedAt }, ts: Date.now() });
       } catch (err) {
         emit({ type: "run.error", data: { message: errMessage(err) }, ts: Date.now() });
       } finally {

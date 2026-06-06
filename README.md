@@ -24,13 +24,17 @@ wave 1 ────────────► one researcher subagent per bulle
 reflection ────────► find low-confidence bullets, coverage gaps, contradictions
   │                   → spawn targeted follow-up waves (budget-bounded)
   ▼
-synthesis ─────────► cited markdown report (Exec summary, per-bullet findings with
-                      numbered [n] citations, Gaps & Open Questions, References, Conclusion)
+synthesis ─────────► Collector agent ⇄ Analyzer agent over the A2A protocol: the
+                      Collector hands the findings to the Analyzer, which formats the
+                      cited markdown report (Exec summary, per-bullet findings with
+                      numbered [n] citations, Gaps & Open Questions, References,
+                      Conclusion) and streams it back for the Collector to deliver
 ```
 
 - **Providers**: web search/extract routes Tavily → Exa with automatic fallback.
-- **Model tiers**: a strong model plans/reflects/synthesizes; a medium model runs the
-  researchers; a cheap model handles structured extraction.
+- **Model tiers**: a strong model plans/reflects (and is the synthesis fallback); a
+  medium model runs the researchers and the A2A Analyzer; cheap models handle
+  structured extraction and the A2A Collector.
 - **Knowledge tools**: citation verification, LLM summarization, embeddings-based
   relevance/dedup, a sandboxed code-exec tool, and YouTube transcripts.
 
@@ -67,6 +71,8 @@ See `.env.example`. Highlights:
 | `OPENAI_API_KEY` | LLM + embeddings (required) |
 | `TAVILY_API_KEY` / `EXA_API_KEY` | search providers (configure at least one) |
 | `OPENAI_MODEL` / `RESEARCHER_MODEL` / `EXTRACTOR_MODEL` | model tiers |
+| `ANALYZER_MODEL` / `COLLECTOR_MODEL` | lighter model tiers for the A2A Analyzer / Collector agents (default to the medium / cheap tiers) |
+| `RESEARCH_USE_A2A` / `A2A_ANALYZER_PORT` | route synthesis through the A2A loop (default on; set `0` for direct synthesis) / loopback port for the in-process Analyzer server |
 | `RESEARCH_CONCURRENCY` / `RESEARCH_MAX_WAVES` / `RESEARCH_MAX_FOLLOWUPS` | engine tuning |
 | `RESEARCH_TOKEN_BUDGET` | stop follow-up waves past N tokens (0 = unlimited) |
 | `SEARCH_MIN_INTERVAL_MS` | proactive rate limit: min ms between provider calls (default 250) |
@@ -103,6 +109,7 @@ pnpm build      # production build
 app/api/chat            in-request streaming endpoint
 app/api/research        durable job endpoints (submit / status / stream / cancel)
 lib/agents              planning, researcher, reflection, synthesis, embeddings, checkpointer
+lib/a2a                 agent-to-agent synthesis: Collector (A2A client) + Analyzer (A2A server) over @a2a-js/sdk
 lib/research            pipeline (the iterative engine), vector store, token budget
 lib/search              provider abstraction (Tavily, Exa) + router
 lib/tools               search / text / data / agent / knowledge / orchestration tool namespaces
@@ -122,18 +129,39 @@ self-contained sub-question to an isolated subagent and compose its structured
 findings — bounded at depth 1 (a spawned subagent's scoped tool set excludes the
 orchestration namespace). See `lib/agents/subagent-runner.ts`.
 
+## Agent-to-agent synthesis (A2A)
+
+The final report is produced by two agents that talk over the
+[Agent2Agent (A2A) protocol](https://a2a-protocol.org) using the official
+[`@a2a-js/sdk`](https://github.com/a2aproject/a2a-js):
+
+- The **Collector** (`lib/a2a/collector.ts`) gathers the structured findings from the
+  researcher subagents and sends them to the Analyzer as an A2A message.
+- The **Analyzer** (`lib/a2a/analyzer-server.ts`) is a real A2A server (Agent Card +
+  JSON-RPC + SSE) bound to loopback and started once per process. Its executor reuses
+  the existing synthesis engine (`lib/agents/synthesis.ts`) on the lighter
+  `ANALYZER_MODEL` tier, streaming the cited markdown report back as task artifacts.
+- The Collector relays those chunks to the user as the same `synthesis.token` events
+  the UI already renders.
+
+Deterministic citation numbering happens in the synthesis engine *before* the model,
+so citations stay correct regardless of the (lighter) Analyzer model. The whole leg is
+gated by `RESEARCH_USE_A2A` (default on) and **fails safe**: any A2A error falls back to
+direct in-process synthesis on the strong `main` model, so a report is never lost.
+
 ## Reliability & observability
 
 External provider calls are wrapped with retries (exponential backoff + jitter)
 **and** a proactive per-provider rate limiter (`lib/utils/rate-limiters.ts`).
 A dependency-free structured logger (`lib/utils/observability-logger.ts`) emits
-JSON-line ops logs (retries, pipeline phases, subagent spawns, worker lifecycle)
-alongside the durable, replayable per-job event log.
+JSON-line ops logs (retries, pipeline phases, subagent spawns, A2A collector/analyzer
+spans, worker lifecycle) alongside the durable, replayable per-job event log.
 
 ## Testing
 
 `pnpm test` runs unit + integration tests (tool registry, schemas, source-pool dedup,
 reflection schema, search-router fallback, vector math, durable event round-trip,
-orchestration-tool registration, rate-limiter spacing, and a `csv_to_json → calculate_stats`
-composition chain). CI (`.github/workflows/ci.yml`) runs `pnpm install`, `pnpm exec tsc --noEmit`,
+orchestration-tool registration, rate-limiter spacing, the A2A synthesis-request
+contract, and a `csv_to_json → calculate_stats` composition chain). CI
+(`.github/workflows/ci.yml`) runs `pnpm install`, `pnpm exec tsc --noEmit`,
 `pnpm lint`, and `pnpm test` on every push and pull request.

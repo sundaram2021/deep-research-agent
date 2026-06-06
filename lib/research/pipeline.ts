@@ -2,6 +2,13 @@
 // runs the iterative research — wave 1, reflection-driven follow-up waves, and
 // synthesis — emitting events through an `emit` callback. The same pipeline backs
 // both the streaming HTTP route and the durable BullMQ worker.
+//
+// Synthesis is delegated to a Collector <-> Analyzer agent-to-agent (A2A) loop:
+// the Collector ships the structured findings to the Analyzer over the A2A
+// protocol, the Analyzer formats the cited markdown report and streams it back,
+// and the Collector relays it here as `synthesis.token`s. If the A2A round trip
+// fails (or RESEARCH_USE_A2A=0), it falls back to direct in-process synthesis so
+// a report is never lost.
 
 import { getModelPair } from "../models";
 import {
@@ -9,7 +16,8 @@ import {
   buildFollowupPrompt,
   createResearcherAgent,
 } from "../agents/researcher-agent";
-import { streamSynthesis } from "../agents/synthesis";
+import { streamSynthesis, type ReportFormat, type SynthesisInput } from "../agents/synthesis";
+import { streamSynthesisViaA2A } from "../a2a/collector";
 import { reflectOnResults } from "../agents/reflection";
 import { getCheckpointer } from "../agents/checkpointer";
 import { SourcePool, withSourcePool } from "../agents/source-pool";
@@ -109,21 +117,48 @@ export async function runResearchPipeline({ topic, bullets, emit, checkCancelled
       for (const run of followRuns) if (run.output) mergeOutput(resultsMap, run.output);
     }
 
-    // --- Synthesis ---
+    // --- Synthesis (Collector <-> Analyzer over A2A, with direct fallback) ---
     await ensureNotCancelled();
     const results = [...resultsMap.values()].sort((a, b) => a.bulletIndex - b.bulletIndex);
-    emit({ type: "synthesis.start", ts: Date.now() });
-
+    const synthesisInput: SynthesisInput = {
+      plan: { originalTopic: topic, bulletPoints: bullets, summary: "" },
+      results,
+    };
+    const format: ReportFormat = reportFormat ?? "deep";
     const aborted = new AbortController();
+    const useA2A = process.env.RESEARCH_USE_A2A !== "0";
+
+    emit({ type: "synthesis.start", ts: Date.now() });
     let assembled = "";
-    for await (const token of streamSynthesis(
-      main,
-      { plan: { originalTopic: topic, bulletPoints: bullets, summary: "" }, results },
-      aborted.signal,
-      reportFormat ?? "deep"
-    )) {
-      assembled += token;
-      emit({ type: "synthesis.token", data: { text: token }, ts: Date.now() });
+
+    // Direct, in-process synthesis on the strong `main` model. Used when A2A is
+    // disabled, and as an automatic fallback if the A2A round trip fails.
+    const streamDirect = async () => {
+      assembled = "";
+      for await (const token of streamSynthesis(main, synthesisInput, aborted.signal, format)) {
+        assembled += token;
+        emit({ type: "synthesis.token", data: { text: token }, ts: Date.now() });
+      }
+    };
+
+    if (useA2A) {
+      try {
+        emit({ type: "a2a.collector.start", ts: Date.now() });
+        for await (const token of streamSynthesisViaA2A(synthesisInput, format)) {
+          assembled += token;
+          emit({ type: "synthesis.token", data: { text: token }, ts: Date.now() });
+        }
+        emit({ type: "a2a.collector.end", data: { chars: assembled.length }, ts: Date.now() });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.warn("pipeline.a2a.fallback", { reason });
+        // Reset any partial A2A output in the UI, then synthesize directly.
+        emit({ type: "a2a.fallback", data: { reason }, ts: Date.now() });
+        emit({ type: "synthesis.start", ts: Date.now() });
+        await streamDirect();
+      }
+    } else {
+      await streamDirect();
     }
 
     if (failedWave1 > 0) {
