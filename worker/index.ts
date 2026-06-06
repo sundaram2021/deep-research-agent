@@ -39,7 +39,7 @@ const worker = new Worker<ResearchJobData>(
         checkCancelled: () => isCancelled(jobId),
         reportFormat,
       });
-      emit({ type: "run.end", ts: Date.now() });
+      emit({ type: "run.end", data: { durationMs: Date.now() - startedAt }, ts: Date.now() });
       await chain;
       await setResult(jobId, report);
       logger.info("worker.job.complete", { jobId, durationMs: Date.now() - startedAt });
